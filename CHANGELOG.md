@@ -5,6 +5,17 @@ versions follow [semver](https://semver.org/): a **minor** release is `docker co
 a **major** release needs the steps in [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
+## [0.1.1]
+
+### Fixed
+
+- The image is published for `linux/amd64` and `linux/arm64`: it now runs on Apple Silicon and
+  ARM servers (AWS Graviton and similar). 0.1.0 was amd64 only.
+
+### Operator actions
+
+- None.
+
 ## [0.1.0]
 
 Initial release.
