@@ -28,16 +28,17 @@ export async function checkDatabase(
     queue?: boolean;
   },
 ) {
-  const { rows } = await pool.query<{
-    version: string;
-    schemaCreate: boolean;
-    dbCreate: boolean;
-    user: string;
-    bypassRls: boolean;
-    queueOwner: string | null;
-    queueInstalled: boolean;
-    database: string;
-  }>(`select current_setting('server_version_num') as version,
+  const { rows } = await connectionCheck(pool, () =>
+    pool.query<{
+      version: string;
+      schemaCreate: boolean;
+      dbCreate: boolean;
+      user: string;
+      bypassRls: boolean;
+      queueOwner: string | null;
+      queueInstalled: boolean;
+      database: string;
+    }>(`select current_setting('server_version_num') as version,
              has_schema_privilege(current_user, 'public', 'CREATE') as "schemaCreate",
              has_database_privilege(current_user, current_database(), 'CREATE') as "dbCreate",
              current_user as "user",
@@ -48,7 +49,8 @@ export async function checkDatabase(
              exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'graphile_worker' and c.relname = 'migrations')
                as "queueInstalled",
-             current_database() as database`);
+             current_database() as database`),
+  );
   const info = rows[0]!;
   const major = Math.floor(Number(info.version) / 10_000);
   if (major < MIN_PG_VERSION) {
@@ -105,6 +107,52 @@ function checkQueueSchema(info: {
         `GRANT CREATE ON DATABASE "${info.database}" TO "${info.user}"; ` +
         "(this allows new schemas only, not tables in public).",
     );
+  }
+}
+
+/** Errors of the first query that mean "cannot reach or log into Postgres", as one line. */
+async function connectionCheck<T>(pool: Pool, query: () => Promise<T>): Promise<T> {
+  try {
+    return await query();
+  } catch (err) {
+    const reason = connectionProblem(err);
+    if (!reason) throw err;
+    throw new DatabasePreflightError(`Cannot connect to Postgres at ${where(pool)}: ${reason}.`);
+  }
+}
+
+function connectionProblem(err: unknown): string | undefined {
+  const e = err as { code?: string; message?: string; errors?: { code?: string }[] };
+  const code = e.code ?? e.errors?.[0]?.code;
+  switch (code) {
+    case "ECONNREFUSED":
+      return "connection refused — is it running, and is the host right? Inside Docker, localhost is the container itself";
+    case "ENOTFOUND":
+    case "EAI_AGAIN":
+      return "host not found";
+    case "ETIMEDOUT":
+      return "timed out";
+    case "28P01":
+    case "28000":
+      return "authentication failed — check the user and password";
+    case "3D000":
+      return "the database does not exist";
+    default:
+      return e.message?.includes("SSL") || e.message?.includes("certificate")
+        ? `TLS: ${e.message}`
+        : undefined;
+  }
+}
+
+/** `host:port/database` from the pool's connection string, without credentials. */
+function where(pool: Pool): string {
+  const url = (pool as unknown as { options: { connectionString?: string } }).options
+    .connectionString;
+  try {
+    const u = new URL(url ?? "");
+    return `${u.hostname}:${u.port || 5432}${u.pathname}`;
+  } catch {
+    return "DATABASE_URL";
   }
 }
 

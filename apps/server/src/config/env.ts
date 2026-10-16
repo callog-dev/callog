@@ -49,8 +49,13 @@ export type Env = z.infer<typeof envSchema>;
 
 export const ENV = Symbol("ENV");
 
+/**
+ * An empty variable means "not set": `.env` files and compose pass `KEY=` lines through as
+ * empty strings, and an optional setting left blank must not fail validation.
+ */
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  const result = envSchema.safeParse(source);
+  const set = Object.fromEntries(Object.entries(source).filter(([, v]) => v !== ""));
+  const result = envSchema.safeParse(set);
   if (!result.success) {
     throw new Error(`Invalid environment:\n${z.prettifyError(result.error)}`);
   }

@@ -91,6 +91,34 @@ describe("database pre-flight (integration)", () => {
   });
 });
 
+describe("database pre-flight: connection problems", () => {
+  const failure = async (url: string) => {
+    const pool = createPool(url);
+    try {
+      const err = await checkDatabase(pool, { migrateOnStart: true }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(DatabasePreflightError);
+      return (err as Error).message;
+    } finally {
+      await pool.end();
+    }
+  };
+
+  it("explains a refused connection without leaking the password", async () => {
+    const message = await failure("postgres://notify:secret@127.0.0.1:1/notify");
+    expect(message).toMatch(
+      /^Cannot connect to Postgres at 127\.0\.0\.1:1\/notify: connection refused/,
+    );
+    expect(message).not.toContain("secret");
+  });
+
+  it("explains a wrong password and a missing database", async () => {
+    const wrongPassword = new URL(TEST_DATABASE_URL);
+    wrongPassword.password = "wrong";
+    expect(await failure(wrongPassword.toString())).toContain("authentication failed");
+    expect(await failure(urlFor("notify_does_not_exist"))).toContain("the database does not exist");
+  });
+});
+
 describe("looksLikePooler", () => {
   it.each([
     ["postgres://u:p@db.internal:6432/notify", true],

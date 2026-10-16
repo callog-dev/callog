@@ -20,54 +20,65 @@ for your own database (managed or your DBA's), poolers, TLS and operator-applied
 cp .env.example .env
 ```
 
-Fill in `.env`:
+Fill in `.env` (leave everything else as is; empty lines mean "not set"):
 
-| Variable                                 | How to get it                                                                    |
-| ---------------------------------------- | -------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`                         | `openssl rand -base64 32` — encrypts Slack tokens at rest                        |
-| `ADMIN_TOKEN`                            | `openssl rand -hex 24` — operator endpoints (`/admin/*`): connect Slack/Telegram |
-| `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET` | Create a GitHub App in your org (below)                                          |
-| `GITHUB_APP_PRIVATE_KEY_FILE`            | Path to the App's `.pem` on the host; mounted into the container                 |
-| `APP_PORT`                               | Host port to publish (default 3000)                                              |
-| `DATABASE_URL`                           | Only for your own Postgres ([docs/setup.md](docs/setup.md))                      |
+| Variable                                           | How to get it                                                                        |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `ENCRYPTION_KEY`                                   | `openssl rand -base64 32` — encrypts Slack and Telegram tokens at rest               |
+| `ADMIN_TOKEN`                                      | `openssl rand -hex 24` — operator endpoints (`/admin/*`): connect Slack and Telegram |
+| `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`           | The GitHub App (below)                                                               |
+| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | The same App → _Client ID_ / _Generate a new client secret_: sign-in to the web UI   |
+| `GITHUB_APP_PRIVATE_KEY_FILE`                      | Path to the App's `.pem` on the host; mounted into the container                     |
+| `PUBLIC_URL`                                       | The URL people open in the browser, e.g. `https://callog.acme.dev`                   |
+| `APP_PORT`                                         | Host port to publish (default 3000)                                                  |
+| `CALLOG_IMAGE`                                     | A release image, e.g. `ghcr.io/callog-dev/callog:0.1.1`; empty = build from source   |
+| `DATABASE_URL`                                     | Only for your own Postgres ([docs/setup.md](docs/setup.md)); empty = bundled one     |
 
 **GitHub App** (org → Settings → Developer settings → GitHub Apps → New):
-webhook URL `https://<your-server>/webhooks/github` with a secret; repository permissions
-_Contents: read_, _Metadata: read_; organization permission _Members: read_; events _Push_
-and _Organization_. Generate a private key, then install the App on the org — the
-installation becomes your tenant.
+
+- webhook URL `$PUBLIC_URL/webhooks/github` with a secret (to try it on a laptop, point it at a
+  [smee.io](https://smee.io) channel and forward it with `pnpm tunnel`, see Development);
+- callback URL `$PUBLIC_URL/oauth/github/callback`;
+- repository permissions _Contents: read_, _Metadata: read_; organization permission
+  _Members: read_; events _Push_ and _Organization_.
+
+Generate a private key, then install the App on the org — the installation becomes your tenant.
 
 ### 2. Start
 
 ```bash
-docker compose --profile db --profile app up -d --build   # bundled Postgres
-docker compose --profile app up -d --build                # your Postgres in DATABASE_URL
+docker compose --profile db --profile app up -d   # bundled Postgres
+docker compose --profile app up -d                # your Postgres in DATABASE_URL
 ```
 
-With a release image instead of a local build, set `CALLOG_IMAGE=ghcr.io/callog-dev/callog:X.Y.Z`
-in `.env` and drop `--build`. The server checks and migrates the database on start. Check it:
+Add `--build` to build the image from source instead of `CALLOG_IMAGE`. The server checks and
+migrates the database on start; a problem with the database is one line in
+`docker compose logs app`. After a few seconds:
 
 ```bash
-curl http://localhost:3000/readyz
+CALLOG=http://localhost:3000   # your PUBLIC_URL; the examples below use it
+curl $CALLOG/readyz
+docker compose logs app | grep "Tenant "   # → Tenant <TENANT_ID> active for org "<org>"
 ```
 
 ### 3. Connect Slack
 
 Create a Slack App from [docs/setup/slack-app-manifest.yaml](docs/setup/slack-app-manifest.yaml),
-install it to your workspace and connect its bot token (`xoxb-…`). The tenant id is in the
-server log line `Tenant … active for org …`.
+install it to your workspace and create an app-level token (`xapp-…`, scope `connections:write`)
+for `/notify` over Socket Mode. Then connect both tokens:
 
 ```bash
-curl -X PUT http://localhost:3000/admin/tenants/$TENANT_ID/slack \
+curl -X PUT $CALLOG/admin/tenants/$TENANT_ID/slack \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d '{"botToken":"xoxb-…"}'
+  -d '{"botToken":"xoxb-…","appToken":"xapp-…"}'
 ```
 
-Add `"appToken":"xapp-…"` (an app-level token with `connections:write`) to enable `/notify`
-over Socket Mode. People are imported from Slack and matched to GitHub accounts
-automatically; anyone can also link their own accounts with `/notify link github` (needs
-`GITHUB_APP_CLIENT_ID`/`_SECRET`, `PUBLIC_URL` and the App callback URL
-`$PUBLIC_URL/oauth/github/callback`) and `/notify link telegram`.
+People are imported from Slack and matched to GitHub accounts automatically where possible.
+
+**Sign in to the web UI.** Sign-in is with GitHub, so your GitHub account must be linked first:
+run `/notify link github` in Slack, open the link and confirm, then sign in at `$PUBLIC_URL`.
+GitHub org owners are admins (`/manage`) and can grant the role to others there. Anyone can link
+their accounts the same way (`/notify link github`, `/notify link telegram`).
 
 ### Connect Telegram (optional)
 
@@ -75,7 +86,7 @@ Create a bot with @BotFather, connect it, then add it to a group — it posts th
 use as `telegram: "<id>"` in routes.
 
 ```bash
-curl -X PUT http://localhost:3000/admin/tenants/$TENANT_ID/telegram \
+curl -X PUT $CALLOG/admin/tenants/$TENANT_ID/telegram \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"botToken":"123456:…"}'
 ```
@@ -85,23 +96,25 @@ curl -X PUT http://localhost:3000/admin/tenants/$TENANT_ID/telegram \
 Create `<org>/notify-config` with `config.yaml`, `teams.yaml` and `routes/*.yaml` — routing
 only: no logins or emails, people are linked in the UI. The
 [reference example](packages/config-schema/fixtures/valid) shows every file; validate changes
-in CI with the [config Action](packages/cli/README.md). Every push to its default branch is
-loaded; an invalid config is rejected and the previous one stays active.
+in CI with the [config Action](packages/cli/README.md). It is loaded when the App is installed
+and on every push to its default branch; an invalid config is rejected and the previous one
+stays active.
 
 ```bash
-curl http://localhost:3000/admin/tenants/$TENANT_ID/config -H "Authorization: Bearer $ADMIN_TOKEN"
+curl $CALLOG/admin/tenants/$TENANT_ID/config -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
 ### 5. Send
 
 From GitHub Actions use the [action](packages/action/README.md) (OIDC, no secrets). From a
-service, create an API key and list its name in the route's `allowed_sources.api_keys`:
+service, create an API key named as in the route's `allowed_sources.api_keys` (`ci` here); the
+response contains the key once:
 
 ```bash
-curl -X POST http://localhost:3000/admin/tenants/$TENANT_ID/api-keys \
-  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"name":"billing"}'
+curl -X POST $CALLOG/admin/tenants/$TENANT_ID/api-keys \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"name":"ci"}'
 
-curl -X POST http://localhost:3000/v1/notify \
+curl -X POST $CALLOG/v1/notify \
   -H "Authorization: Bearer $NOTIFY_API_KEY" -H "Content-Type: application/json" \
   -d '{"route":"e2e-failed","data":{"branch":"main"},"recipients":["github:octocat"]}'
 ```
@@ -120,7 +133,7 @@ curl -X POST http://localhost:3000/v1/notify \
 
 ```bash
 pnpm install
-pnpm db:up            # Postgres in Docker
+pnpm db:up            # Postgres in Docker; in .env: DATABASE_URL=postgres://notify:notify@localhost:5432/notify
 pnpm build && pnpm test && pnpm test:int
 pnpm --filter @callog/server dev
 ```

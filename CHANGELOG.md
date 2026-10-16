@@ -5,6 +5,26 @@ versions follow [semver](https://semver.org/): a **minor** release is `docker co
 a **major** release needs the steps in [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
+## [0.1.2]
+
+### Fixed
+
+- The server no longer crashes on empty variables copied from `.env.example`
+  (`DATABASE_URL_DIRECT=`, `DATABASE_SSL_CA_PATH=`, `ADMIN_TOKEN=`): an empty value means "not set".
+- With the bundled Postgres, `DATABASE_URL` from `.env.example` no longer overrides the
+  database address inside Docker (it pointed the container at its own `localhost`).
+- An unreachable database, a wrong password or a missing database is reported as one line at
+  start instead of a stack trace.
+
+### Changed
+
+- README: the GitHub App OAuth settings and `PUBLIC_URL` are part of the setup, the first
+  sign-in goes through `/notify link github`, and the examples use your server URL.
+
+### Operator actions
+
+- If you copied `.env.example` for 0.1.0/0.1.1 and worked around these problems, nothing to do.
+
 ## [0.1.1]
 
 ### Fixed
