@@ -1,0 +1,17 @@
+packages:
+  - apps/*
+  - packages/*
+
+catalog:
+  "@eslint/js": ^10.0.0
+  "@types/node": ^24.19.2
+  eslint: ^10.12.0
+  prettier: ^3.9.0
+  # TS 7 (native) has no JS API yet; Nest CLI and typescript-eslint need ~6.0.
+  typescript: ~6.0.3
+  typescript-eslint: ^8.71.0
+  vitest: ^5.0.4
+
+onlyBuiltDependencies:
+  - "@swc/core"
+  - "@nestjs/core"

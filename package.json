@@ -1,0 +1,30 @@
+{
+  "name": "callog",
+  "private": true,
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:up": "docker-compose --profile db up -d postgres",
+    "db:down": "docker-compose --profile db down",
+    "test:int": "pnpm -r --if-present test:int",
+    "tunnel": "node scripts/tunnel.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "globals": "^17.13.0",
+    "prettier": "catalog:",
+    "smee-client": "^5.0.0",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:"
+  }
+}

@@ -1,0 +1,22 @@
+id: fe-e2e-failed
+description: e2e failures on main
+allowed_sources:
+  github_repos: [company/fe-e2e]
+destinations:
+  - slack: "#fe-alerts"
+  - team: frontend
+schema:
+  type: object
+  required: [branch, run_url]
+  properties:
+    branch: { type: string }
+    failed: { type: integer }
+    run_url: { type: string, format: uri }
+template:
+  - header: "🔴 e2e failed on {{ data.branch }}"
+  - text: "Failed tests: **{{ data.failed }}**. Author: {{ recipients | mention }}"
+  - buttons:
+      - { text: "Open run", url: "{{ data.run_url }}" }
+examples:
+  - data: { branch: main, failed: 3, run_url: "https://github.com/company/fe-e2e/actions/runs/1" }
+    recipients: ["github:octocat"]

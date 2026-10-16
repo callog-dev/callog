@@ -1,0 +1,52 @@
+name: Callog notify
+description: Send a notification through Callog (routes, people and channels are configured in your config repo)
+author: callog-dev
+branding:
+  icon: bell
+  color: blue
+inputs:
+  url:
+    description: Base URL of your Callog server
+    required: true
+  route:
+    description: Route id from the config repo (routes/<id>.yaml)
+    required: true
+  data:
+    description: JSON object with template data
+    required: false
+    default: "{}"
+  recipients:
+    description: People or teams to mention, comma or newline separated (github:octocat, team:frontend, email:…)
+    required: false
+    default: ""
+  mention-author:
+    description: Also mention the GitHub user who triggered the run (commit/PR author when available)
+    required: false
+    default: "false"
+  thread-key:
+    description: Messages with the same key go into one thread
+    required: false
+  update:
+    description: Edit the thread's first message instead of posting (requires thread-key)
+    required: false
+    default: "false"
+  idempotency-key:
+    description: "Defaults to a key derived from the run attempt, job and request, so a step retried within one run attempt is not delivered twice (a re-run of the workflow is a new attempt). Matrix legs share the job name: set a key per leg if they can send identical requests"
+    required: false
+  api-key:
+    description: "Use an API key instead of GitHub OIDC (OIDC needs `permissions: id-token: write`)"
+    required: false
+  audience:
+    description: OIDC audience the server expects
+    required: false
+    default: callog
+  fail-on-error:
+    description: Fail the step when the notification cannot be sent (by default only a warning)
+    required: false
+    default: "false"
+outputs:
+  notification-id:
+    description: Id of the accepted notification
+runs:
+  using: node24
+  main: dist/index.js

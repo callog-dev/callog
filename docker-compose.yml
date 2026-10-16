@@ -1,0 +1,46 @@
+services:
+  # Bundled Postgres for development and small installs: `docker compose --profile db …`.
+  # Production installs usually point DATABASE_URL at their own Postgres (docs/setup.md).
+  postgres:
+    profiles: [db]
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: notify
+      POSTGRES_PASSWORD: notify
+      POSTGRES_DB: notify
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notify -d notify"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Self-hosted server: `docker compose --profile db --profile app up -d` (see README).
+  app:
+    profiles: [app]
+    # A release: CALLOG_IMAGE=ghcr.io/callog-dev/callog:X.Y.Z (docs/upgrade.md); else built locally.
+    image: ${CALLOG_IMAGE:-callog:local}
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://notify:notify@postgres:5432/notify}
+      PORT: "3000"
+      GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app.pem
+    volumes:
+      - ${GITHUB_APP_PRIVATE_KEY_FILE:-./github-app.pem}:/run/secrets/github-app.pem:ro
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+volumes:
+  pgdata:

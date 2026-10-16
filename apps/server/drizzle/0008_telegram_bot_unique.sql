@@ -1,0 +1,1 @@
+ALTER TABLE "telegram_connections" ADD CONSTRAINT "telegram_connections_bot_id_unique" UNIQUE("bot_id");

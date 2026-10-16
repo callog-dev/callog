@@ -1,0 +1,18 @@
+name: Callog validate
+description: Check a Callog config repo (routes, teams, templates) the way the server will
+inputs:
+  path:
+    description: Directory of the config inside the repository
+    required: false
+    default: "."
+  preview:
+    description: On pull requests, comment a preview of changed routes (needs pull-requests write)
+    required: false
+    default: "true"
+  token:
+    description: Token for the preview comment
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: node24
+  main: dist-action/index.js

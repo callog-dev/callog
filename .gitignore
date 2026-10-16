@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.DS_Store
+dist-action
+
+# Built GitHub Actions are committed: `uses:` runs this code (JavaScript only).
+!packages/action/dist/
+packages/action/dist/*.d.ts
+packages/action/dist/*.map
+!packages/cli/dist-action/

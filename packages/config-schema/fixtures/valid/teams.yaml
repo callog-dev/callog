@@ -1,0 +1,6 @@
+teams:
+  frontend:
+    slack_channel: "#fe-team"
+    telegram_chat: fe-team-chat
+    members_from:
+      github_team: frontend

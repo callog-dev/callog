@@ -1,0 +1,38 @@
+# Slack App manifest for Callog (api.slack.com/apps → Create New App → From an app manifest,
+# or App Manifest → paste → Save for an existing app; reinstall after scope changes).
+# Socket Mode delivers /notify without a public URL; it needs an
+# app-level token (xapp-…) with connections:write.
+display_information:
+  name: Callog
+  description: Engineering notifications routed by Callog
+  background_color: "#1f2937"
+features:
+  bot_user:
+    display_name: Callog
+    always_online: true
+  slash_commands:
+    - command: /notify
+      description: Link your GitHub/Telegram accounts, see what notify knows about you
+      usage_hint: "link github | link telegram | whoami | help"
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write # post messages
+      - chat:write.public # post to public channels without being invited
+      - channels:read # resolve #channel names to ids
+      - groups:read # resolve private channels the bot was invited to
+      - im:write # open DMs
+      - users:read # user sync
+      - users:read.email # match people by work email (identity anchor)
+      - usergroups:read # team members_from slack_usergroup
+      - commands # /notify
+settings:
+  event_subscriptions:
+    bot_events:
+      - user_change # profile changes and deactivations → directory re-sync
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

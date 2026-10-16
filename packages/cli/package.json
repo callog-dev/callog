@@ -1,0 +1,29 @@
+{
+  "name": "@callog/cli",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && esbuild src/action-entry.ts --bundle --platform=node --target=node24 --outfile=dist-action/index.js --log-level=warning",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "esbuild": "^0.28.2",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "bin": {
+    "notify": "dist/bin.js"
+  },
+  "dependencies": {
+    "@callog/config-schema": "workspace:*",
+    "@callog/templates": "workspace:*"
+  }
+}
