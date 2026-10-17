@@ -1,8 +1,10 @@
-import { Controller, Get, NotFoundException, Req, Res } from "@nestjs/common";
+import { Controller, Get, Inject, NotFoundException, Req, Res } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ServeStaticModule } from "@nestjs/serve-static";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { GITHUB_APP_CONFIG, type GithubAppConfig } from "../github/github.config";
+import { SETUP_PATH } from "../setup/github-app-manifest";
 
 /** Built SPA (`apps/web/dist`); in the container it is copied to WEB_DIST_DIR. */
 const WEB_DIST_DIR = process.env.WEB_DIST_DIR ?? path.resolve(__dirname, "../../../web/dist");
@@ -19,6 +21,7 @@ const SERVER_PREFIXES = new Set([
   "metrics",
   "healthz",
   "readyz",
+  "setup",
 ]);
 
 /**
@@ -29,11 +32,21 @@ const SERVER_PREFIXES = new Set([
 export class SpaController {
   private readonly html = readFileSync(path.join(WEB_DIST_DIR, "index.html"), "utf8");
 
+  constructor(@Inject(GITHUB_APP_CONFIG) private readonly app: GithubAppConfig | undefined) {}
+
   // Fastify's own wildcard syntax (the adapter passes it through).
   @Get("*")
-  index(@Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): string {
+  index(
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): string | undefined {
     const first = req.url.split("?")[0]!.split("/")[1] ?? "";
     if (SERVER_PREFIXES.has(first)) throw new NotFoundException();
+    // Nothing in the UI works without the App: a fresh install starts by creating it.
+    if (!this.app) {
+      reply.redirect(SETUP_PATH, 302);
+      return;
+    }
     reply
       .header("content-type", "text/html; charset=utf-8")
       .header("cache-control", "no-cache")
@@ -51,6 +64,8 @@ export function webUiModule() {
       rootPath: WEB_DIST_DIR,
       // Fallback rendering is done by SpaController; keep the built-in one out of the way.
       renderPath: "/__notify_static_index",
+      // `/` too goes through SpaController, which sends a fresh install to the setup page.
+      serveStaticOptions: { index: false },
     }),
   ];
 }

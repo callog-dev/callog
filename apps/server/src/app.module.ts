@@ -11,6 +11,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { ProducersModule } from "./producers/producers.module";
 import { QueueModule } from "./queue/queue.module";
 import { RoutingModule } from "./routing/routing.module";
+import { SetupModule } from "./setup/setup.module";
 import { SlackModule } from "./slack/slack.module";
 import { TenantConfigModule } from "./tenant-config/tenant-config.module";
 import { TenantsModule } from "./tenants/tenants.module";
@@ -34,6 +35,7 @@ import { WebModule } from "./web/web.module";
     DeliveryModule,
     LifecycleModule,
     WebModule,
+    SetupModule,
     ...webUiModule(),
     HealthModule,
   ],

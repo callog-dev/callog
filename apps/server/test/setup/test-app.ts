@@ -10,6 +10,11 @@ import { signWebhookBody } from "../../src/github/webhook-signature";
 import { GITHUB_OAUTH_CLIENT, type GithubOAuthClient } from "../../src/identity/github-oauth";
 import { DESTINATION_RATE_LIMITER, DestinationRateLimiter } from "../../src/delivery/rate-limiter";
 import { OIDC_KEY_RESOLVER } from "../../src/producers/github-oidc";
+import {
+  GITHUB_APP_CONVERSION_CLIENT,
+  type GithubAppConversionClient,
+} from "../../src/setup/github-app-conversion";
+import type { CreatedGithubApp } from "../../src/setup/github-app-manifest";
 import { SLACK_API_FACTORY } from "../../src/slack/slack-api";
 import { SLACK_SOCKET_FACTORY } from "../../src/slack/slack-socket";
 import { TELEGRAM_API_FACTORY } from "../../src/telegram/telegram-api";
@@ -26,7 +31,9 @@ export const WEBHOOK_SECRET = "test-webhook-secret";
 export const ADMIN_TOKEN = "test-admin-token-0123456789";
 
 /** Full app against the test database with GitHub replaced by an in-memory fake. */
-export async function createTestApp(options: { role?: "api" | "worker" | "all" } = {}) {
+export async function createTestApp(
+  options: { role?: "api" | "worker" | "all"; githubApp?: boolean } = {},
+) {
   Object.assign(process.env, {
     DATABASE_URL: TEST_DATABASE_URL,
     ROLE: options.role ?? "api",
@@ -41,6 +48,11 @@ export async function createTestApp(options: { role?: "api" | "worker" | "all" }
     GITHUB_APP_CLIENT_SECRET: "test-client-secret",
     PUBLIC_URL: "https://notify.test",
   });
+  if (options.githubApp === false) {
+    for (const key of ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET"]) {
+      delete process.env[key];
+    }
+  }
   if ((options.role ?? "api") !== "api") {
     // Other test files leave jobs behind; a fresh worker must not spend its time on them.
     const pool = createPool(TEST_DATABASE_URL);
@@ -59,6 +71,15 @@ export async function createTestApp(options: { role?: "api" | "worker" | "all" }
       return user;
     },
   };
+  /** Manifest flow code → the App GitHub "created" for it. */
+  const createdApps = new Map<string, CreatedGithubApp>();
+  const appConversion: GithubAppConversionClient = {
+    convert: async (code) => {
+      const created = createdApps.get(code);
+      if (!created) throw new Error("GitHub answered 404");
+      return created;
+    },
+  };
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(GithubAppService)
     .useValue(github)
@@ -72,6 +93,8 @@ export async function createTestApp(options: { role?: "api" | "worker" | "all" }
     .useValue(telegram.factory)
     .overrideProvider(GITHUB_OAUTH_CLIENT)
     .useValue(githubOAuth)
+    .overrideProvider(GITHUB_APP_CONVERSION_CLIENT)
+    .useValue(appConversion)
     // No real spacing between messages in tests.
     .overrideProvider(DESTINATION_RATE_LIMITER)
     .useValue(new DestinationRateLimiter({ default: 0, telegramGroup: 0 }))
@@ -109,7 +132,17 @@ export async function createTestApp(options: { role?: "api" | "worker" | "all" }
       ...(payload === undefined ? {} : { payload: payload as object }),
     });
 
-  return { app, github, slack, telegram, oidc, githubOAuthUsers, sendWebhook, adminRequest };
+  return {
+    app,
+    github,
+    slack,
+    telegram,
+    oidc,
+    githubOAuthUsers,
+    createdApps,
+    sendWebhook,
+    adminRequest,
+  };
 }
 
 export async function eventually<T>(

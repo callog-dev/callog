@@ -6,6 +6,7 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
 import { loadEnv } from "./config/env";
+import { SecretBox } from "./crypto/secret-box";
 import { createPool, poolOptions } from "./db/db";
 import { runAllMigrations } from "./db/migrate";
 import { checkDatabase, DatabasePreflightError } from "./db/preflight";
@@ -16,6 +17,21 @@ const DOTENV = path.resolve(__dirname, "../../../.env");
 async function bootstrap(): Promise<void> {
   if (existsSync(DOTENV)) process.loadEnvFile(DOTENV);
   const env = loadEnv();
+  // Not generated on the fly: a key that lives only in the container would take every stored
+  // Slack and Telegram token with it when the container is recreated.
+  if (!env.ENCRYPTION_KEY) {
+    console.error(
+      "ENCRYPTION_KEY is not set. Generate one with `openssl rand -base64 32`, put it into .env " +
+        "and back it up together with the database: it encrypts Slack and Telegram tokens.",
+    );
+    process.exit(1);
+  }
+  try {
+    new SecretBox(env.ENCRYPTION_KEY);
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
+  }
   // The database is checked and migrated before Nest starts: a misconfigured self-hosted
   // install fails here with one readable line (docs/setup.md).
   const pool = createPool(env.DATABASE_URL, poolOptions(env));

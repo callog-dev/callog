@@ -17,6 +17,6 @@ import { GithubWebhooksService } from "./github-webhooks.service";
     GithubAppService,
     GithubWebhooksService,
   ],
-  exports: [GithubAppService, GithubWebhooksService],
+  exports: [GITHUB_APP_CONFIG, GithubAppService, GithubWebhooksService],
 })
 export class GithubModule {}

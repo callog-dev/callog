@@ -13,13 +13,16 @@ import {
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { randomBytes } from "node:crypto";
 import { safeEqual } from "../crypto/digest";
+import { GITHUB_APP_CONFIG, type GithubAppConfig } from "../github/github.config";
 import { AccountLinkingService } from "../identity/account-linking.service";
 import {
   GITHUB_OAUTH_CLIENT,
   GithubOAuthConfig,
   type GithubOAuthClient,
 } from "../identity/github-oauth";
+import { SETUP_PATH } from "../setup/github-app-manifest";
 import { clearCookie, cookie, readCookie } from "./cookies";
+import { escapeHtml, htmlDocument } from "./html";
 import {
   LOGIN_STATE_COOKIE,
   SESSION_COOKIE,
@@ -49,10 +52,16 @@ export class GithubOAuthController {
     @Inject(GITHUB_OAUTH_CLIENT) private readonly oauth: GithubOAuthClient,
     private readonly linking: AccountLinkingService,
     private readonly sessions: SessionsService,
+    @Inject(GITHUB_APP_CONFIG) private readonly app: GithubAppConfig | undefined,
   ) {}
 
   @Get("auth/github/login")
   login(@Res({ passthrough: true }) reply: FastifyReply): void {
+    // A fresh install signs in with the App it does not have yet: create it first.
+    if (!this.app) {
+      reply.redirect(SETUP_PATH, 302);
+      return;
+    }
     if (!this.config.enabled) {
       reply
         .status(503)
@@ -181,9 +190,6 @@ export class GithubOAuthController {
 
 const INVALID_LINK = "This link is invalid or expired. Run /notify link github in Slack again.";
 
-const escapeHtml = (text: string) =>
-  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
 function page(
   message: string,
   { icon = "⚠️", confirm }: { icon?: string; confirm?: { action: string; label: string } } = {},
@@ -191,9 +197,7 @@ function page(
   const form = confirm
     ? `<form method="post" action="${escapeHtml(confirm.action)}"><button>${escapeHtml(confirm.label)}</button></form>`
     : "";
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Callog</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{font:16px system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem;color:#111}
-@media (prefers-color-scheme:dark){body{background:#111;color:#eee}}a{color:inherit}</style></head>
-<body><h1>${icon} Callog</h1><p>${escapeHtml(message)}</p>${form}<p><a href="/">Open Callog</a></p></body></html>`;
+  return htmlDocument(
+    `<h1>${icon} Callog</h1><p>${escapeHtml(message)}</p>${form}<p><a href="/">Open Callog</a></p>`,
+  );
 }
