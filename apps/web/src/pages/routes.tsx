@@ -18,7 +18,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api, type RouteSummary } from "@/lib/api";
 
-export function RoutesPage() {
+/** `linked`: personal copies belong to a person, so an unlinked owner cannot mute them. */
+export function RoutesPage({ linked }: { linked: boolean }) {
   const routes = useQuery({ queryKey: ["routes"], queryFn: api.routes });
   const client = useQueryClient();
   const toggle = useMutation({
@@ -144,13 +145,17 @@ export function RoutesPage() {
                           <span>
                             <Switch
                               checked={!r.muted}
-                              disabled={toggle.isPending}
+                              disabled={!linked || toggle.isPending}
                               onCheckedChange={() => toggle.mutate(r)}
                               aria-label={`Personal copies of ${r.id}`}
                             />
                           </span>
                         </TooltipTrigger>
-                        <TooltipContent>Mentions in channels stay either way</TooltipContent>
+                        <TooltipContent>
+                          {linked
+                            ? "Mentions in channels stay either way"
+                            : "Link your GitHub account to manage personal copies"}
+                        </TooltipContent>
                       </Tooltip>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">

@@ -78,6 +78,13 @@
       "when": 1792084095043,
       "tag": "0010_tenant_admins",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792257604791,
+      "tag": "0011_owner_sessions",
+      "breakpoints": true
     }
   ]
 }

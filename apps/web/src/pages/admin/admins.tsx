@@ -115,7 +115,7 @@ export function AdminsTab({ me }: { me: Me }) {
                   <TableRow key={a.person.id}>
                     <TableCell className="font-medium">
                       {a.person.name}
-                      {a.person.id === me.person.id && (
+                      {a.person.id === me.person?.id && (
                         <Badge variant="outline" className="ml-2">
                           you
                         </Badge>

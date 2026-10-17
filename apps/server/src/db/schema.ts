@@ -309,9 +309,12 @@ export const webSessions = pgTable(
   {
     id: id(),
     tenantId: tenantId(),
-    personId: uuid("person_id")
-      .notNull()
-      .references(() => persons.id, { onDelete: "cascade" }),
+    /**
+     * Null for a GitHub org owner signed in before their GitHub account is linked to a person:
+     * such a session only reaches the admin pages, and only while they own the org.
+     */
+    personId: uuid("person_id").references(() => persons.id, { onDelete: "cascade" }),
+    githubLogin: text("github_login"),
     tokenHash: text("token_hash").notNull().unique(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: createdAt(),
@@ -341,6 +344,8 @@ export const auditLog = pgTable(
     tenantId: tenantId(),
     /** Null for changes the system made (e.g. a role dropped on deactivation). */
     actorPersonId: uuid("actor_person_id").references(() => persons.id, { onDelete: "set null" }),
+    /** An org owner acting without a linked person. */
+    actorGithubLogin: text("actor_github_login"),
     action: text("action").notNull(),
     subjectPersonId: uuid("subject_person_id").references(() => persons.id, {
       onDelete: "set null",

@@ -17,9 +17,8 @@ export class AdminSessionGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     await this.sessions.canActivate(context);
-    const { tenantId, personId } = context.switchToHttp().getRequest<SessionRequest>().session!;
-    if (!(await this.admins.isAdmin(tenantId, personId)))
-      throw new ForbiddenException("Admins only");
+    const session = context.switchToHttp().getRequest<SessionRequest>().session!;
+    if (!(await this.admins.isAdminSession(session))) throw new ForbiddenException("Admins only");
     return true;
   }
 }

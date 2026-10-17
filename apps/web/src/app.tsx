@@ -43,8 +43,10 @@ function Shell({ me }: { me: Me }) {
     onSuccess: () => window.location.assign("/"),
   });
   const { resolvedTheme, setTheme } = useTheme();
-  const initials = me.person.name
-    .split(/\s+/)
+  const name = me.person?.name ?? `@${me.githubLogin}`;
+  const initials = name
+    .replace(/^@/, "")
+    .split(/[\s-]+/)
     .map((w) => w[0])
     .join("")
     .slice(0, 2)
@@ -96,7 +98,7 @@ function Shell({ me }: { me: Me }) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuLabel>{me.person.name}</DropdownMenuLabel>
+                <DropdownMenuLabel>{name}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => logout.mutate()}>
                   <LogOut /> Sign out
@@ -108,10 +110,13 @@ function Shell({ me }: { me: Me }) {
       </header>
       <main className="mx-auto max-w-5xl p-4 md:p-6">
         <Routes>
-          <Route path="/routes" element={<RoutesPage />} />
+          <Route path="/routes" element={<RoutesPage linked={me.person !== null} />} />
           <Route path="/me" element={<MePage me={me} />} />
           {me.isAdmin && <Route path="/manage" element={<AdminPage me={me} />} />}
-          <Route path="*" element={<Navigate to="/routes" replace />} />
+          <Route
+            path="*"
+            element={<Navigate to={me.person || !me.isAdmin ? "/routes" : "/manage"} replace />}
+          />
         </Routes>
       </main>
     </div>

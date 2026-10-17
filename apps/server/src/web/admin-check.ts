@@ -6,6 +6,7 @@ import { identities, persons, USABLE_CONFIDENCE } from "../db/schema";
 import { GithubAppService } from "../github/github-app.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
 import { TenantsService } from "../tenants/tenants.service";
+import type { Session } from "./sessions.service";
 
 /** Org roles change rarely; every admin request (and `/api/me`) needs one. */
 const ORG_ROLE_CACHE_MS = 60_000;
@@ -29,6 +30,23 @@ export class AdminCheck {
     return (await this.admins.has(tenantId, personId)) || this.isOrgOwner(tenantId, personId);
   }
 
+  /** A session without a person belongs to an org owner and lasts only while they are one. */
+  async isAdminSession(session: Session): Promise<boolean> {
+    if (session.personId) return this.isAdmin(session.tenantId, session.personId);
+    return session.githubLogin ? this.isOwnerLogin(session.tenantId, session.githubLogin) : false;
+  }
+
+  /**
+   * The tenant an unlinked GitHub user signs in to: the first active one whose org they own.
+   * Lets the owner set up a fresh install before Slack is connected.
+   */
+  async tenantOwnedBy(githubLogin: string): Promise<string | undefined> {
+    for (const tenant of await this.tenants.listActive()) {
+      if (await this.isOwnerLogin(tenant.id, githubLogin)) return tenant.id;
+    }
+    return undefined;
+  }
+
   /** Owners cannot be demoted here: the role is GitHub's. */
   async isOrgOwner(tenantId: string, personId: string): Promise<boolean> {
     const accounts = await this.db
@@ -48,7 +66,11 @@ export class AdminCheck {
       );
 
     const login = accounts.find((a) => a.provider === "github" && a.handle)?.handle;
-    if (!login || !this.githubApp.enabled) return false;
+    return login ? this.isOwnerLogin(tenantId, login) : false;
+  }
+
+  private async isOwnerLogin(tenantId: string, login: string): Promise<boolean> {
+    if (!this.githubApp.enabled) return false;
     const key = `${tenantId}:${login}`;
     const cached = this.orgOwners.get(key);
     if (cached && Date.now() - cached.at < ORG_ROLE_CACHE_MS) return cached.owner;

@@ -29,7 +29,7 @@ import { configRepoOf, TenantsService } from "../tenants/tenants.service";
 import { AdminCheck } from "./admin-check";
 import { clearCookie, readCookie } from "./cookies";
 import { SESSION_COOKIE, SessionsService } from "./sessions.service";
-import { SessionGuard, type SessionRequest } from "./session.guard";
+import { PersonGuard, SessionGuard, type SessionRequest } from "./session.guard";
 
 const dmBody = z.object({ channel: z.enum(["slack", "telegram"]) });
 
@@ -49,17 +49,30 @@ export class ApiController {
   @Get("me")
   @UseGuards(SessionGuard)
   async me(@Req() req: SessionRequest) {
-    const { tenantId, personId } = req.session!;
-    const [person] = await this.db.select().from(persons).where(eq(persons.id, personId));
+    const session = req.session!;
+    const { tenantId, personId } = session;
     const tenant = await this.tenants.findById(tenantId);
+    const isAdmin = await this.adminCheck.isAdminSession(session);
+    if (!personId) {
+      return {
+        person: null,
+        githubLogin: session.githubLogin,
+        org: tenant!.githubOrgLogin,
+        isAdmin,
+        identities: [],
+        preferences: null,
+      };
+    }
+    const [person] = await this.db.select().from(persons).where(eq(persons.id, personId));
     const accounts = await this.db
       .select()
       .from(identities)
       .where(and(eq(identities.tenantId, tenantId), eq(identities.personId, personId)));
     return {
       person: { id: personId, name: person!.displayName },
+      githubLogin: null,
       org: tenant!.githubOrgLogin,
-      isAdmin: await this.adminCheck.isAdmin(tenantId, personId),
+      isAdmin,
       identities: accounts
         .map((a) => ({
           provider: a.provider,
@@ -80,7 +93,7 @@ export class ApiController {
     const tenant = (await this.tenants.findById(tenantId))!;
     const active = await this.configs.getActive(tenantId);
     const { owner, repo } = configRepoOf(tenant);
-    const muted = new Set((await this.preferences.get(personId)).mutedRoutes);
+    const muted = new Set(personId ? (await this.preferences.get(personId)).mutedRoutes : []);
     const routes = Object.values(active?.config.routes ?? {}).map((route) => ({
       route,
       targets: routeTargets(route, active!.config),
@@ -115,9 +128,10 @@ export class ApiController {
   }
 
   @Put("me/preferences/dm")
-  @UseGuards(SessionGuard)
+  @UseGuards(PersonGuard)
   async setDm(@Req() req: SessionRequest, @Body() body: unknown) {
-    const { tenantId, personId } = req.session!;
+    const { tenantId } = req.session!;
+    const personId = req.session!.personId!;
     const { channel } = parseBody(dmBody, body);
     if (channel === "telegram") {
       const linked = await this.db
@@ -132,9 +146,10 @@ export class ApiController {
   }
 
   @Put("me/mutes/:routeId")
-  @UseGuards(SessionGuard)
+  @UseGuards(PersonGuard)
   async mute(@Req() req: SessionRequest, @Param("routeId") routeId: string) {
-    const { tenantId, personId } = req.session!;
+    const { tenantId } = req.session!;
+    const personId = req.session!.personId!;
     const routes = (await this.configs.getActive(tenantId))?.config.routes ?? {};
     if (!ownValue(routes, routeId)) throw new NotFoundException(`Route "${routeId}" not found`);
     await this.preferences.mute(tenantId, personId, routeId);
@@ -142,10 +157,11 @@ export class ApiController {
   }
 
   @Delete("me/mutes/:routeId")
-  @UseGuards(SessionGuard)
+  @UseGuards(PersonGuard)
   async unmute(@Req() req: SessionRequest, @Param("routeId") routeId: string) {
-    await this.preferences.unmute(req.session!.personId, routeId);
-    return this.preferences.get(req.session!.personId);
+    const personId = req.session!.personId!;
+    await this.preferences.unmute(personId, routeId);
+    return this.preferences.get(personId);
   }
 
   @Post("auth/logout")

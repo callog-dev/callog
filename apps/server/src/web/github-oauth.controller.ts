@@ -21,6 +21,7 @@ import {
   type GithubOAuthClient,
 } from "../identity/github-oauth";
 import { SETUP_PATH } from "../setup/github-app-manifest";
+import { AdminCheck } from "./admin-check";
 import { clearCookie, cookie, readCookie } from "./cookies";
 import { escapeHtml, htmlDocument } from "./html";
 import {
@@ -28,6 +29,7 @@ import {
   SESSION_COOKIE,
   SESSION_TTL_S,
   SessionsService,
+  type Session,
 } from "./sessions.service";
 
 /** `state` of a web login; anything else in `state` is a one-time link token. */
@@ -53,6 +55,7 @@ export class GithubOAuthController {
     private readonly linking: AccountLinkingService,
     private readonly sessions: SessionsService,
     @Inject(GITHUB_APP_CONFIG) private readonly app: GithubAppConfig | undefined,
+    private readonly adminCheck: AdminCheck,
   ) {}
 
   @Get("auth/github/login")
@@ -114,13 +117,19 @@ export class GithubOAuthController {
     }
 
     if (isLogin) {
-      const who = await this.sessions.personForGithubUser(user.id);
-      if (!who) {
+      const linked = await this.sessions.personForGithubUser(user.id);
+      const ownerTenant = linked ? undefined : await this.adminCheck.tenantOwnedBy(user.login);
+      const session: Session | undefined = linked
+        ? { ...linked, githubLogin: null }
+        : ownerTenant
+          ? { tenantId: ownerTenant, personId: null, githubLogin: user.login }
+          : undefined;
+      if (!session) {
         return page(
           `GitHub @${user.login} is not linked to anyone here yet. Run /notify link github in Slack, then sign in again.`,
         );
       }
-      const token = await this.sessions.create(who);
+      const token = await this.sessions.create(session);
       reply
         .header("set-cookie", [
           cookie(SESSION_COOKIE, token, {

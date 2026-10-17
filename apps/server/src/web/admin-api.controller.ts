@@ -115,7 +115,7 @@ export class AdminApiController {
 
   @Post("admins")
   async grantAdmin(@Req() req: SessionRequest, @Body() body: unknown) {
-    const { tenantId, personId: actorId } = req.session!;
+    const { tenantId } = req.session!;
     const { personId } = parseBody(adminBody, body);
     const [person] = await this.db
       .select({ status: persons.status })
@@ -123,7 +123,7 @@ export class AdminApiController {
       .where(and(eq(persons.tenantId, tenantId), eq(persons.id, personId)));
     if (!person) throw new NotFoundException("No such person");
     if (person.status !== "active") throw new BadRequestException("The person is inactive");
-    return { ok: true, changed: await this.admins.grant(tenantId, personId, actorId) };
+    return { ok: true, changed: await this.admins.grant(tenantId, personId, req.session!) };
   }
 
   @Delete("admins/:personId")
@@ -132,13 +132,14 @@ export class AdminApiController {
     @Req() req: SessionRequest,
     @Param("personId", ParseUUIDPipe) personId: string,
   ): Promise<void> {
-    const { tenantId, personId: actorId } = req.session!;
+    const { tenantId } = req.session!;
     if (await this.adminCheck.isOrgOwner(tenantId, personId)) {
       throw new BadRequestException(
         "GitHub org owners are always admins; change the role on GitHub",
       );
     }
-    if (!(await this.admins.revoke(tenantId, personId, actorId))) throw new NotFoundException();
+    if (!(await this.admins.revoke(tenantId, personId, req.session!)))
+      throw new NotFoundException();
   }
 
   // ---- Deliveries ----
@@ -350,6 +351,44 @@ export class AdminApiController {
   }
 
   // ---- Config and integrations ----
+
+  /**
+   * The "Getting started" checklist. Every step is read from the current state, so steps done
+   * through the operator API or before an upgrade show as done.
+   */
+  @Get("onboarding")
+  async onboarding(@Req() req: SessionRequest) {
+    const { tenantId, personId } = req.session!;
+    const tenant = (await this.tenants.findById(tenantId))!;
+    const configRepo = configRepoOf(tenant);
+    const [slack, telegram, active, latest, [delivered]] = await Promise.all([
+      this.slack.find(tenantId),
+      this.telegram.find(tenantId),
+      this.configs.getActive(tenantId),
+      this.configs.latest(tenantId),
+      this.db
+        .select({ id: deliveries.id })
+        .from(deliveries)
+        .where(and(eq(deliveries.tenantId, tenantId), eq(deliveries.status, "sent")))
+        .limit(1),
+    ]);
+    const steps = {
+      githubApp: { done: true, org: tenant.githubOrgLogin },
+      slack: { done: Boolean(slack), team: slack?.teamName ?? null },
+      linkGithub: { done: personId !== null },
+      telegram: { done: Boolean(telegram), optional: true },
+      config: {
+        done: Boolean(active),
+        repo: `${configRepo.owner}/${configRepo.repo}`,
+        rejected: latest?.status === "invalid",
+      },
+      firstNotification: { done: delivered !== undefined },
+    };
+    return {
+      steps,
+      complete: Object.values(steps).every((s) => s.done || ("optional" in s && s.optional)),
+    };
+  }
 
   @Get("status")
   async status(@Req() req: SessionRequest) {

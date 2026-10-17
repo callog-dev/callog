@@ -11,7 +11,7 @@ import { AdminCheck } from "./admin-check";
 import { AdminSessionGuard } from "./admin-session.guard";
 import { ApiController } from "./api.controller";
 import { GithubOAuthController } from "./github-oauth.controller";
-import { SessionGuard } from "./session.guard";
+import { PersonGuard, SessionGuard } from "./session.guard";
 import { SessionsService } from "./sessions.service";
 
 @Module({
@@ -25,6 +25,6 @@ import { SessionsService } from "./sessions.service";
     TelegramModule,
   ],
   controllers: [GithubOAuthController, ApiController, AdminApiController],
-  providers: [SessionsService, SessionGuard, AdminCheck, AdminSessionGuard],
+  providers: [SessionsService, SessionGuard, PersonGuard, AdminCheck, AdminSessionGuard],
 })
 export class WebModule {}

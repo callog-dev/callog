@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { ENV, type Env } from "../config/env";
 import { sha256Hex } from "../crypto/digest";
@@ -12,7 +12,10 @@ export const SESSION_TTL_S = 7 * 24 * 3600;
 
 export interface Session {
   tenantId: string;
-  personId: string;
+  /** Null for an org owner whose GitHub account is not linked to a person yet. */
+  personId: string | null;
+  /** Set when `personId` is null: the owner's GitHub login. */
+  githubLogin: string | null;
 }
 
 @Injectable()
@@ -41,15 +44,19 @@ export class SessionsService {
   async resolve(token: string | undefined): Promise<Session | undefined> {
     if (!token) return undefined;
     const [row] = await this.db
-      .select({ tenantId: webSessions.tenantId, personId: webSessions.personId })
+      .select({
+        tenantId: webSessions.tenantId,
+        personId: webSessions.personId,
+        githubLogin: webSessions.githubLogin,
+      })
       .from(webSessions)
-      .innerJoin(persons, eq(persons.id, webSessions.personId))
+      .leftJoin(persons, eq(persons.id, webSessions.personId))
       .innerJoin(tenants, eq(tenants.id, webSessions.tenantId))
       .where(
         and(
           eq(webSessions.tokenHash, sha256Hex(token)),
           gt(webSessions.expiresAt, new Date()),
-          eq(persons.status, "active"),
+          or(isNull(webSessions.personId), eq(persons.status, "active")),
           eq(tenants.status, "active"),
         ),
       );
@@ -64,7 +71,9 @@ export class SessionsService {
    * The person a GitHub account logs in as: a usable (verified/high) github identity of an
    * active person. A GitHub user in several organizations gets the one linked first.
    */
-  async personForGithubUser(githubUserId: number): Promise<Session | undefined> {
+  async personForGithubUser(
+    githubUserId: number,
+  ): Promise<{ tenantId: string; personId: string } | undefined> {
     const [row] = await this.db
       .select({ tenantId: identities.tenantId, personId: identities.personId })
       .from(identities)

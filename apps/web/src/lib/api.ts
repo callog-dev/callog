@@ -14,13 +14,26 @@ export interface Preferences {
   mutedRoutes: string[];
 }
 
-export interface Me {
-  person: { id: string; name: string };
-  org: string;
-  isAdmin: boolean;
-  identities: Identity[];
-  preferences: Preferences;
-}
+/** `person` is null for an org owner signed in before their GitHub account is linked. */
+export type Me =
+  | {
+      person: { id: string; name: string };
+      githubLogin: null;
+      org: string;
+      isAdmin: boolean;
+      identities: Identity[];
+      preferences: Preferences;
+    }
+  | {
+      person: null;
+      githubLogin: string;
+      org: string;
+      isAdmin: boolean;
+      identities: [];
+      preferences: null;
+    };
+
+export type LinkedMe = Extract<Me, { person: object }>;
 
 export interface RouteSummary {
   id: string;
@@ -191,7 +204,20 @@ export interface ConfigIssue {
   message: string;
 }
 
+export interface Onboarding {
+  steps: {
+    githubApp: { done: boolean; org: string };
+    slack: { done: boolean; team: string | null };
+    linkGithub: { done: boolean };
+    telegram: { done: boolean; optional: true };
+    config: { done: boolean; repo: string; rejected: boolean };
+    firstNotification: { done: boolean };
+  };
+  complete: boolean;
+}
+
 export const adminApi = {
+  onboarding: () => request<Onboarding>("GET", "/api/admin/onboarding"),
   status: () => request<AdminStatus>("GET", "/api/admin/status"),
   reloadConfig: () => request<{ status: string }>("POST", "/api/admin/config/reload"),
   notifications: (params: { status?: string; before?: string }) => {

@@ -1,10 +1,18 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { DB, type Db, type DbOrTx } from "../db/db";
 import { auditLog, persons, tenantAdmins } from "../db/schema";
 
 export type AdminRoleAction = "admin.granted" | "admin.revoked";
+
+/** Who changes a role: a person, or an org owner not linked to one yet. */
+export interface AdminActor {
+  personId: string | null;
+  githubLogin: string | null;
+}
+
+const SYSTEM: AdminActor = { personId: null, githubLogin: null };
 
 /**
  * The admin role granted inside the product. GitHub org owners are admins
@@ -40,24 +48,24 @@ export class TenantAdminsService {
   }
 
   /** Idempotent: granting an existing admin changes nothing and logs nothing. */
-  async grant(tenantId: string, personId: string, actorId: string): Promise<boolean> {
+  async grant(tenantId: string, personId: string, actor: AdminActor): Promise<boolean> {
     const rows = await this.db
       .insert(tenantAdmins)
-      .values({ tenantId, personId, grantedBy: actorId })
+      .values({ tenantId, personId, grantedBy: actor.personId })
       .onConflictDoNothing()
       .returning({ personId: tenantAdmins.personId });
     if (rows.length === 0) return false;
-    await this.record(this.db, tenantId, "admin.granted", personId, actorId);
+    await this.record(this.db, tenantId, "admin.granted", personId, actor);
     return true;
   }
 
-  async revoke(tenantId: string, personId: string, actorId: string): Promise<boolean> {
-    return this.remove(this.db, tenantId, personId, actorId, undefined);
+  async revoke(tenantId: string, personId: string, actor: AdminActor): Promise<boolean> {
+    return this.remove(this.db, tenantId, personId, actor, undefined);
   }
 
   /** A person who left (inactive) keeps no role; runs with the deactivation. */
   async revokeOnDeactivation(executor: DbOrTx, tenantId: string, personId: string): Promise<void> {
-    if (await this.remove(executor, tenantId, personId, null, { reason: "inactive" })) {
+    if (await this.remove(executor, tenantId, personId, SYSTEM, { reason: "inactive" })) {
       this.logger.log(`Admin role of person ${personId} revoked: person is inactive`);
     }
   }
@@ -69,7 +77,9 @@ export class TenantAdminsService {
       .select({
         id: auditLog.id,
         action: auditLog.action,
-        actor: actor.displayName,
+        actor: sql<
+          string | null
+        >`coalesce(${actor.displayName}, '@' || ${auditLog.actorGithubLogin})`,
         subject: subject.displayName,
         details: auditLog.details,
         createdAt: auditLog.createdAt,
@@ -86,7 +96,7 @@ export class TenantAdminsService {
     executor: DbOrTx,
     tenantId: string,
     personId: string,
-    actorId: string | null,
+    actor: AdminActor,
     details: Record<string, unknown> | undefined,
   ): Promise<boolean> {
     const rows = await executor
@@ -94,7 +104,7 @@ export class TenantAdminsService {
       .where(and(eq(tenantAdmins.tenantId, tenantId), eq(tenantAdmins.personId, personId)))
       .returning({ personId: tenantAdmins.personId });
     if (rows.length === 0) return false;
-    await this.record(executor, tenantId, "admin.revoked", personId, actorId, details);
+    await this.record(executor, tenantId, "admin.revoked", personId, actor, details);
     return true;
   }
 
@@ -103,11 +113,16 @@ export class TenantAdminsService {
     tenantId: string,
     action: AdminRoleAction,
     subjectPersonId: string,
-    actorPersonId: string | null,
+    actor: AdminActor,
     details?: Record<string, unknown>,
   ): Promise<void> {
-    await executor
-      .insert(auditLog)
-      .values({ tenantId, action, subjectPersonId, actorPersonId, details: details ?? null });
+    await executor.insert(auditLog).values({
+      tenantId,
+      action,
+      subjectPersonId,
+      actorPersonId: actor.personId,
+      actorGithubLogin: actor.personId ? null : actor.githubLogin,
+      details: details ?? null,
+    });
   }
 }

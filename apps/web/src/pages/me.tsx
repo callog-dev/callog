@@ -7,12 +7,35 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
-import { api, type DmChannel, type Identity, type Me } from "@/lib/api";
+import { api, type DmChannel, type Identity, type LinkedMe, type Me } from "@/lib/api";
 
 const display = (i: Identity) =>
   i.provider === "telegram" && i.handle ? `@${i.handle}` : (i.handle ?? i.externalId);
 
 export function MePage({ me }: { me: Me }) {
+  return me.person ? <PersonPage me={me} /> : <UnlinkedPage me={me} />;
+}
+
+function UnlinkedPage({ me }: { me: Me }) {
+  return (
+    <Card className="max-w-xl">
+      <CardHeader>
+        <CardTitle>@{me.githubLogin}</CardTitle>
+        <CardDescription>
+          You are signed in as an owner of {me.org}, but your GitHub account is not linked to you in
+          Slack yet.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="text-sm">
+        Run <code className="rounded bg-muted px-1">/notify link github</code> in Slack, confirm the
+        link and sign in again: notifications will mention you, and you can choose where personal
+        copies arrive.
+      </CardContent>
+    </Card>
+  );
+}
+
+function PersonPage({ me }: { me: LinkedMe }) {
   const client = useQueryClient();
   const hasTelegram = me.identities.some(
     (i) => i.provider === "telegram" && i.confidence !== "suggested",
