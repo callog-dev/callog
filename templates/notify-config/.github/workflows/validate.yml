@@ -1,0 +1,13 @@
+# Checks every change the way the Callog server will, and comments a preview of changed
+# routes on pull requests.
+name: Validate
+on: [pull_request, push]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: callog-dev/callog/packages/cli@v0.1.2

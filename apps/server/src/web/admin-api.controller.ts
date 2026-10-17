@@ -15,7 +15,7 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { parseRef, type Ref } from "@callog/config-schema";
+import { parseRef, type ConfigIssue, type Ref } from "@callog/config-schema";
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { parseBody } from "../admin/parse-body";
@@ -417,7 +417,11 @@ export class AdminApiController {
         .limit(1),
     ]);
     const steps = {
-      githubApp: { done: true, org: tenant.githubOrgLogin },
+      githubApp: {
+        done: true,
+        org: tenant.githubOrgLogin,
+        installationId: tenant.githubInstallationId,
+      },
       slack: { done: Boolean(slack), team: slack?.teamName ?? null },
       linkGithub: { done: personId !== null },
       telegram: { done: Boolean(telegram), optional: true, bot: telegram?.botUsername ?? null },
@@ -425,6 +429,11 @@ export class AdminApiController {
         done: Boolean(active),
         repo: `${configRepo.owner}/${configRepo.repo}`,
         rejected: latest?.status === "invalid",
+        /** The first problems of a rejected push; the rest are in the Overview tab. */
+        errors:
+          latest?.status === "invalid"
+            ? ((latest.errors as { errors?: ConfigIssue[] } | null)?.errors ?? []).slice(0, 3)
+            : [],
       },
       firstNotification: { done: delivered !== undefined },
     };

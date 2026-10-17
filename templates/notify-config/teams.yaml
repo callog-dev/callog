@@ -1,0 +1,10 @@
+# Teams are delivery addresses: a route can send to `team: <name>` and mention its members.
+# Members come from a GitHub team and/or a Slack user group; people are linked in Callog,
+# not here.
+#
+# teams:
+#   frontend:
+#     slack_channel: "#fe-team"
+#     members_from:
+#       github_team: frontend
+teams: {}

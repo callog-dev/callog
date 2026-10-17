@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Circle, CircleAlert } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, Circle, CircleAlert, RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { adminApi, type Onboarding } from "@/lib/api";
 import { SlackConnectDialog, TelegramConnectDialog } from "./connect-channels";
@@ -98,11 +99,14 @@ function stepList(steps: Onboarding["steps"], open: (dialog: "slack" | "telegram
       title: `Add the config repo ${steps.config.repo}`,
       done: steps.config.done,
       problem: steps.config.rejected,
-      hint: steps.config.rejected ? (
-        "The latest push was rejected: the errors are in the Overview tab."
-      ) : (
-        <>Routes live in this repo — {guide}.</>
+      hint: (
+        <ConfigRepoHint
+          org={steps.githubApp.org}
+          installationId={steps.githubApp.installationId}
+          {...steps.config}
+        />
       ),
+      action: <LoadConfigButton />,
     },
     {
       title: "Send a first notification",
@@ -128,4 +132,87 @@ function StepIcon({ done, problem }: { done: boolean; problem?: boolean }) {
     );
   if (problem) return <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />;
   return <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
+}
+
+const TEMPLATE = { owner: "callog-dev", name: "notify-config-template" };
+
+function ConfigRepoHint({
+  org,
+  repo,
+  rejected,
+  errors,
+  installationId,
+}: Onboarding["steps"]["config"] & { org: string; installationId: number | null }) {
+  if (rejected) {
+    return (
+      <>
+        The latest push was rejected; the previous version stays active.
+        <ul className="mt-1 list-disc pl-4">
+          {errors.map((e, i) => (
+            <li key={i}>
+              <code>{[e.file, e.path.join(".")].filter(Boolean).join(" › ")}</code> — {e.message}
+            </li>
+          ))}
+        </ul>
+      </>
+    );
+  }
+  const [owner, name] = repo.split("/");
+  const create = new URL("https://github.com/new");
+  create.search = new URLSearchParams({
+    template_owner: TEMPLATE.owner,
+    template_name: TEMPLATE.name,
+    owner: owner!,
+    name: name!,
+    visibility: "private",
+  }).toString();
+  return (
+    <>
+      Routes live in this repo.{" "}
+      <a
+        className="underline underline-offset-4"
+        href={create.toString()}
+        target="_blank"
+        rel="noreferrer"
+      >
+        Create it from the template
+      </a>
+      , then load it. Callog also loads every push to its default branch.
+      {installationId && (
+        <>
+          {" "}
+          If the GitHub App can see selected repositories only,{" "}
+          <a
+            className="underline underline-offset-4"
+            href={`https://github.com/organizations/${org}/settings/installations/${installationId}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            add {name} to it
+          </a>
+          .
+        </>
+      )}
+    </>
+  );
+}
+
+function LoadConfigButton() {
+  const client = useQueryClient();
+  const load = useMutation({
+    mutationFn: adminApi.reloadConfig,
+    onSuccess: (r) => {
+      if (r.status === "skipped") toast.error(`Not loaded: ${r.reason}`);
+      else if (r.status === "invalid") toast.error("The config has errors");
+      else toast.success("Config loaded");
+      void client.invalidateQueries({ queryKey: ["admin"] });
+      void client.invalidateQueries({ queryKey: ["routes"] });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  return (
+    <Button size="sm" variant="outline" disabled={load.isPending} onClick={() => load.mutate()}>
+      <RefreshCw className={load.isPending ? "animate-spin" : ""} /> Load now
+    </Button>
+  );
 }

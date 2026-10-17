@@ -206,11 +206,11 @@ export interface ConfigIssue {
 
 export interface Onboarding {
   steps: {
-    githubApp: { done: boolean; org: string };
+    githubApp: { done: boolean; org: string; installationId: number | null };
     slack: { done: boolean; team: string | null };
     linkGithub: { done: boolean };
     telegram: { done: boolean; optional: true; bot: string | null };
-    config: { done: boolean; repo: string; rejected: boolean };
+    config: { done: boolean; repo: string; rejected: boolean; errors: ConfigIssue[] };
     firstNotification: { done: boolean };
   };
   complete: boolean;
@@ -230,7 +230,8 @@ export const adminApi = {
     request<{ bot: string }>("PUT", "/api/admin/telegram", { botToken }),
   telegramChats: () => request<TelegramChat[]>("GET", "/api/admin/telegram/chats"),
   status: () => request<AdminStatus>("GET", "/api/admin/status"),
-  reloadConfig: () => request<{ status: string }>("POST", "/api/admin/config/reload"),
+  reloadConfig: () =>
+    request<{ status: string; reason?: string }>("POST", "/api/admin/config/reload"),
   notifications: (params: { status?: string; before?: string }) => {
     const q = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v) as [string, string][],

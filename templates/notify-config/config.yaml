@@ -1,0 +1,2 @@
+# How long Callog keeps notifications and their payloads.
+retention_days: 30

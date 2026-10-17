@@ -7,6 +7,8 @@ import { send } from "./send";
 import { validate } from "./validate";
 
 const FIXTURE = path.resolve(__dirname, "../../config-schema/fixtures/valid");
+/** The starter repo new installs create from the setup checklist. */
+const TEMPLATE = path.resolve(__dirname, "../../../templates/notify-config");
 
 function repo(files: Record<string, string>): string {
   const dir = mkdtempSync(path.join(tmpdir(), "notify-config-"));
@@ -30,6 +32,12 @@ describe("notify validate", () => {
     const report = validate({ dir: FIXTURE });
     expect(report.ok).toBe(true);
     expect(report.summary).toBe("✔ Config is valid: 1 route, 1 team");
+  });
+
+  it("accepts the config repo template", () => {
+    const report = validate({ dir: TEMPLATE });
+    expect(report.ok).toBe(true);
+    expect(report.summary).toBe("✔ Config is valid: 1 route, 0 teams");
   });
 
   it("reports config and template errors with file and path", () => {

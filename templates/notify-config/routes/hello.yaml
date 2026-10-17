@@ -1,0 +1,20 @@
+# A first route. Point it at a channel of yours, rename it to what it announces
+# (e2e-failed, deploy-finished, …) and send to it from CI or a service.
+id: hello
+description: First route, sent from the Callog setup checklist
+allowed_sources:
+  # Repositories whose GitHub Actions may send here (no secrets needed), e.g. [acme/web].
+  github_repos: []
+  # API keys by name, created in Callog → Admin → API keys.
+  api_keys: [ci]
+destinations:
+  - slack: "#general"
+schema:
+  type: object
+  properties:
+    text: { type: string }
+template:
+  - text: "{{ data.text | default: 'Hello from Callog' }} {{ recipients | mention }}"
+examples:
+  - data: { text: "Hello from Callog" }
+    recipients: ["github:octocat"]
