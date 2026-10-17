@@ -124,7 +124,7 @@ describe("first sign-in and the Getting started checklist (integration)", () => 
         githubApp: { done: true, org: "acme" },
         slack: { done: false, team: null },
         linkGithub: { done: false },
-        telegram: { done: false, optional: true },
+        telegram: { done: false, optional: true, bot: null },
         config: { done: false, repo: "acme/notify-config", rejected: false },
         firstNotification: { done: false },
       },

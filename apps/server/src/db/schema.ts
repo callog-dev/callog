@@ -258,6 +258,23 @@ export const telegramConnections = pgTable("telegram_connections", {
 });
 
 /**
+ * Groups and channels the tenant's bot is in. The Bot API cannot list them, so they are
+ * remembered when the bot joins or someone sends /chatid, and dropped when it leaves.
+ */
+export const telegramChats = pgTable(
+  "telegram_chats",
+  {
+    tenantId: tenantId(),
+    chatId: text("chat_id").notNull(),
+    title: text("title"),
+    type: text("type").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.chatId] })],
+);
+
+/**
  * One-time tokens that prove "the Slack user who asked" owns the account being linked
  * (Telegram deep-link, GitHub OAuth state). Stored hashed, short-lived.
  */

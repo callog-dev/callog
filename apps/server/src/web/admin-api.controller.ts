@@ -10,6 +10,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -24,7 +25,13 @@ import { GithubAppService } from "../github/github-app.service";
 import { PeopleService } from "../identity/people.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
 import { apiKeyNameSchema, ApiKeysService } from "../producers/api-keys.service";
+import { slackConnectBody } from "../slack/admin-slack.controller";
+import { SlackTokenRejectedError } from "../slack/slack-api";
 import { SlackConnectionsService } from "../slack/slack-connections.service";
+import { SlackEvents } from "../slack/slack-events";
+import { telegramConnectBody } from "../telegram/admin-telegram.controller";
+import { TelegramApiError } from "../telegram/telegram-api";
+import { TelegramChatsService } from "../telegram/telegram-chats.service";
 import { TelegramConnectionsService } from "../telegram/telegram-connections.service";
 import { RecipientResolver } from "../routing/recipient-resolver";
 import { ConfigLoader } from "../tenant-config/config-loader";
@@ -63,7 +70,9 @@ export class AdminApiController {
     private readonly people: PeopleService,
     private readonly apiKeys: ApiKeysService,
     private readonly slack: SlackConnectionsService,
+    private readonly slackEvents: SlackEvents,
     private readonly telegram: TelegramConnectionsService,
+    private readonly telegramChats: TelegramChatsService,
     private readonly githubApp: GithubAppService,
     private readonly admins: TenantAdminsService,
     private readonly adminCheck: AdminCheck,
@@ -352,6 +361,41 @@ export class AdminApiController {
 
   // ---- Config and integrations ----
 
+  // ---- Channels ----
+
+  /** Both tokens: the bot token posts, the app-level one runs /notify over Socket Mode. */
+  @Put("slack")
+  async connectSlack(@Req() req: SessionRequest, @Body() body: unknown) {
+    const { tenantId } = req.session!;
+    const { botToken, appToken } = parseBody(slackConnectBody.required(), body);
+    try {
+      const connection = await this.slack.connect(tenantId, botToken, appToken);
+      await this.slackEvents.requestSync(tenantId);
+      return { team: connection.teamName };
+    } catch (err) {
+      if (err instanceof SlackTokenRejectedError) throw new BadRequestException(err.message);
+      throw err;
+    }
+  }
+
+  @Put("telegram")
+  async connectTelegram(@Req() req: SessionRequest, @Body() body: unknown) {
+    const { tenantId } = req.session!;
+    const { botToken } = parseBody(telegramConnectBody, body);
+    try {
+      return { bot: (await this.telegram.connect(tenantId, botToken)).botUsername };
+    } catch (err) {
+      if (err instanceof TelegramApiError)
+        throw new BadRequestException(`Telegram rejected the token: ${err.description}`);
+      throw err;
+    }
+  }
+
+  @Get("telegram/chats")
+  telegramChatList(@Req() req: SessionRequest) {
+    return this.telegramChats.list(req.session!.tenantId);
+  }
+
   /**
    * The "Getting started" checklist. Every step is read from the current state, so steps done
    * through the operator API or before an upgrade show as done.
@@ -376,7 +420,7 @@ export class AdminApiController {
       githubApp: { done: true, org: tenant.githubOrgLogin },
       slack: { done: Boolean(slack), team: slack?.teamName ?? null },
       linkGithub: { done: personId !== null },
-      telegram: { done: Boolean(telegram), optional: true },
+      telegram: { done: Boolean(telegram), optional: true, bot: telegram?.botUsername ?? null },
       config: {
         done: Boolean(active),
         repo: `${configRepo.owner}/${configRepo.repo}`,

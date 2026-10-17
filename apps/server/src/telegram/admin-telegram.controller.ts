@@ -15,7 +15,9 @@ import { TelegramApiError } from "./telegram-api";
 import { TelegramConnectionsService } from "./telegram-connections.service";
 import { TelegramSender } from "./telegram-sender";
 
-const connectBody = z.object({ botToken: z.string().regex(/^\d+:[\w-]+$/, "a BotFather token") });
+export const telegramConnectBody = z.object({
+  botToken: z.string().regex(/^\d+:[\w-]+$/, "a BotFather token"),
+});
 const testBody = z.object({ chatId: z.string().min(1), text: z.string().min(1) });
 
 @Controller("admin/tenants/:tenantId/telegram")
@@ -28,7 +30,7 @@ export class AdminTelegramController {
 
   @Put()
   async connect(@Param("tenantId", ParseUUIDPipe) tenantId: string, @Body() body: unknown) {
-    const { botToken } = parseBody(connectBody, body);
+    const { botToken } = parseBody(telegramConnectBody, body);
     try {
       const connection = await this.connections.connect(tenantId, botToken);
       return { botId: connection.botId, botUsername: connection.botUsername };

@@ -9,6 +9,8 @@ import {
 import type { SlackSocketClient } from "../../src/slack/slack-socket";
 
 export const GOOD_SLACK_TOKEN = "xoxb-test-good";
+/** Any other `xapp-` token passes the app-level token check. */
+export const BAD_SLACK_APP_TOKEN = "xapp-test-bad";
 
 type SocketHandler = (args: {
   body: Record<string, unknown>;
@@ -72,6 +74,10 @@ export class FakeSlack {
     return {
       authTest: () =>
         guard(() => ({ teamId: "T0TEST", teamName: "test-team", botUserId: "U0BOT" })),
+      checkAppToken: () =>
+        token.startsWith("xapp-") && token !== BAD_SLACK_APP_TOKEN
+          ? Promise.resolve()
+          : Promise.reject(new SlackApiError("invalid_auth")),
       listUsers: () => guard(() => this.users),
       listChannels: () =>
         guard(() => {

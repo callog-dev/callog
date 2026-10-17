@@ -37,6 +37,11 @@ export interface SlackMessagePayload {
  */
 export interface SlackApi {
   authTest(): Promise<{ teamId: string; teamName: string; botUserId: string }>;
+  /**
+   * For an app-level token (`xapp-…`): asks for a Socket Mode URL to prove the token works.
+   * The URL itself is not used.
+   */
+  checkAppToken(): Promise<void>;
   listUsers(): Promise<SlackUser[]>;
   listChannels(): Promise<SlackChannel[]>;
   listUsergroups(): Promise<SlackUsergroup[]>;
@@ -48,6 +53,17 @@ export interface SlackApi {
     ts: string,
     message: SlackMessagePayload,
   ): Promise<SlackPostResult>;
+}
+
+/** Slack refused one of the tokens being connected. */
+export class SlackTokenRejectedError extends Error {
+  constructor(
+    readonly token: "bot" | "app",
+    readonly code: string,
+  ) {
+    super(`Slack rejected the ${token === "bot" ? "bot" : "app-level"} token: ${code}`);
+    this.name = "SlackTokenRejectedError";
+  }
 }
 
 /** A Slack API error with the Slack error code (`channel_not_found`, `ratelimited`, …). */
@@ -89,6 +105,12 @@ class WebClientSlackApi implements SlackApi {
     return call(async () => {
       const res = await this.client.auth.test();
       return { teamId: res.team_id!, teamName: res.team!, botUserId: res.user_id! };
+    });
+  }
+
+  checkAppToken() {
+    return call(async () => {
+      await this.client.apps.connections.open({});
     });
   }
 

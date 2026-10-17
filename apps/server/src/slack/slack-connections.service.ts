@@ -4,7 +4,13 @@ import { SECRET_BOX } from "../crypto/crypto.module";
 import type { SecretBox } from "../crypto/secret-box";
 import { DB, type Db } from "../db/db";
 import { slackConnections } from "../db/schema";
-import { SLACK_API_FACTORY, type SlackApi, type SlackApiFactory } from "./slack-api";
+import {
+  SLACK_API_FACTORY,
+  SlackApiError,
+  SlackTokenRejectedError,
+  type SlackApi,
+  type SlackApiFactory,
+} from "./slack-api";
 
 export type SlackConnection = typeof slackConnections.$inferSelect;
 
@@ -19,10 +25,14 @@ export class SlackConnectionsService {
     @Inject(SLACK_API_FACTORY) private readonly createApi: SlackApiFactory,
   ) {}
 
-  /** Validates the token with Slack and stores it for the tenant (no OAuth install yet). */
+  /**
+   * Checks the tokens with Slack and stores them for the tenant (no OAuth install yet).
+   * Throws `SlackTokenRejectedError` naming the token Slack refused.
+   */
   async connect(tenantId: string, botToken: string, appToken?: string): Promise<SlackConnection> {
     const box = this.requireSecrets();
-    const info = await this.createApi(botToken).authTest();
+    const info = await rejectedAs("bot", this.createApi(botToken).authTest());
+    if (appToken) await rejectedAs("app", this.createApi(appToken).checkAppToken());
     const values = {
       teamId: info.teamId,
       teamName: info.teamName,
@@ -92,5 +102,14 @@ export class SlackConnectionsService {
   private requireSecrets(): SecretBox {
     if (!this.secrets) throw new ServiceUnavailableException("ENCRYPTION_KEY is not configured");
     return this.secrets;
+  }
+}
+
+async function rejectedAs<T>(token: "bot" | "app", call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (err) {
+    if (err instanceof SlackApiError) throw new SlackTokenRejectedError(token, err.code);
+    throw err;
   }
 }

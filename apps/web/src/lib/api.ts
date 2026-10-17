@@ -209,15 +209,26 @@ export interface Onboarding {
     githubApp: { done: boolean; org: string };
     slack: { done: boolean; team: string | null };
     linkGithub: { done: boolean };
-    telegram: { done: boolean; optional: true };
+    telegram: { done: boolean; optional: true; bot: string | null };
     config: { done: boolean; repo: string; rejected: boolean };
     firstNotification: { done: boolean };
   };
   complete: boolean;
 }
 
+export interface TelegramChat {
+  chatId: string;
+  title: string | null;
+  type: string;
+}
+
 export const adminApi = {
   onboarding: () => request<Onboarding>("GET", "/api/admin/onboarding"),
+  connectSlack: (botToken: string, appToken: string) =>
+    request<{ team: string }>("PUT", "/api/admin/slack", { botToken, appToken }),
+  connectTelegram: (botToken: string) =>
+    request<{ bot: string }>("PUT", "/api/admin/telegram", { botToken }),
+  telegramChats: () => request<TelegramChat[]>("GET", "/api/admin/telegram/chats"),
   status: () => request<AdminStatus>("GET", "/api/admin/status"),
   reloadConfig: () => request<{ status: string }>("POST", "/api/admin/config/reload"),
   notifications: (params: { status?: string; before?: string }) => {

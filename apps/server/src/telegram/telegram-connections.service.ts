@@ -3,7 +3,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { SECRET_BOX } from "../crypto/crypto.module";
 import type { SecretBox } from "../crypto/secret-box";
 import { DB, type Db } from "../db/db";
-import { telegramConnections } from "../db/schema";
+import { telegramChats, telegramConnections } from "../db/schema";
 import { TELEGRAM_API_FACTORY, type TelegramApi, type TelegramApiFactory } from "./telegram-api";
 
 export type TelegramConnection = typeof telegramConnections.$inferSelect;
@@ -45,17 +45,25 @@ export class TelegramConnectionsService {
       botUsername: me.username,
       botTokenEncrypted: this.secrets.encrypt(botToken),
     };
-    const [connection] = await this.db
-      .insert(telegramConnections)
-      .values({ tenantId, ...values })
-      .onConflictDoUpdate({
-        target: telegramConnections.tenantId,
-        set: { ...values, lastUpdateId: 0 },
-      })
-      .returning();
+    const previous = await this.find(tenantId);
+    const connection = await this.db.transaction(async (tx) => {
+      // The chats were the old bot's: the new one is in none of them yet.
+      if (previous && previous.botId !== values.botId) {
+        await tx.delete(telegramChats).where(eq(telegramChats.tenantId, tenantId));
+      }
+      const [row] = await tx
+        .insert(telegramConnections)
+        .values({ tenantId, ...values })
+        .onConflictDoUpdate({
+          target: telegramConnections.tenantId,
+          set: { ...values, lastUpdateId: 0 },
+        })
+        .returning();
+      return row!;
+    });
     this.clients.delete(tenantId);
-    for (const listener of this.connectedListeners) listener(connection!);
-    return connection!;
+    for (const listener of this.connectedListeners) listener(connection);
+    return connection;
   }
 
   async find(tenantId: string): Promise<TelegramConnection | undefined> {

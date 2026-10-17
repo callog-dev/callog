@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { AccountLinkingService } from "../identity/account-linking.service";
 import { escapeTelegram } from "@callog/templates";
 import type { TelegramApi, TelegramChat, TelegramUpdate } from "./telegram-api";
+import { TelegramChatsService } from "./telegram-chats.service";
 
 const CHATID_COMMAND = /^\/chatid(?:@(\w+))?\s*$/i;
 const START_COMMAND = /^\/start(?:@(\w+))?(?:\s+([\w-]+))?\s*$/i;
@@ -15,7 +16,10 @@ const START_COMMAND = /^\/start(?:@(\w+))?(?:\s+([\w-]+))?\s*$/i;
 export class TelegramUpdates {
   private readonly logger = new Logger(TelegramUpdates.name);
 
-  constructor(private readonly linking: AccountLinkingService) {}
+  constructor(
+    private readonly linking: AccountLinkingService,
+    private readonly chats: TelegramChatsService,
+  ) {}
 
   /** `botUsername`: commands addressed to another bot (`/chatid@other_bot`) are ignored. */
   async handle(
@@ -28,6 +32,8 @@ export class TelegramUpdates {
     const forUs = (match: RegExpExecArray | null) =>
       match && (!match[1] || match[1].toLowerCase() === botUsername.toLowerCase());
     if (update.message && text && forUs(CHATID_COMMAND.exec(text))) {
+      // Also picks up chats the bot joined before chats were remembered.
+      if (isGroup(update.message.chat)) await this.chats.remember(tenantId, update.message.chat);
       await this.sendChatId(api, update.message.chat, update.message.message_id);
       return;
     }
@@ -46,15 +52,17 @@ export class TelegramUpdates {
       return;
     }
     const member = update.my_chat_member;
-    if (
-      member &&
-      isGroup(member.chat) &&
-      joined(member.old_chat_member.status, member.new_chat_member.status)
-    ) {
+    if (!member || !isGroup(member.chat)) return;
+    const { status: before } = member.old_chat_member;
+    const { status: after } = member.new_chat_member;
+    if (joined(before, after)) {
       this.logger.log(
         `Bot added to "${member.chat.title}" (${member.chat.id}) for tenant ${tenantId}`,
       );
+      await this.chats.remember(tenantId, member.chat);
       await this.sendChatId(api, member.chat);
+    } else if (OUTSIDE.includes(after)) {
+      await this.chats.forget(tenantId, String(member.chat.id));
     }
   }
 
@@ -100,8 +108,9 @@ function isGroup(chat: TelegramChat): boolean {
   return chat.type === "group" || chat.type === "supergroup" || chat.type === "channel";
 }
 
+const OUTSIDE = ["left", "kicked"];
+const INSIDE = ["member", "administrator", "creator"];
+
 function joined(oldStatus: string, newStatus: string): boolean {
-  const out = ["left", "kicked"];
-  const inside = ["member", "administrator", "creator"];
-  return out.includes(oldStatus) && inside.includes(newStatus);
+  return OUTSIDE.includes(oldStatus) && INSIDE.includes(newStatus);
 }

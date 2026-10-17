@@ -12,13 +12,13 @@ import {
 import { z } from "zod";
 import { AdminTokenGuard } from "../admin/admin-token.guard";
 import { parseBody } from "../admin/parse-body";
-import { SlackApiError } from "./slack-api";
+import { SlackApiError, SlackTokenRejectedError } from "./slack-api";
 import { SlackConnectionsService } from "./slack-connections.service";
 import { SlackEvents } from "./slack-events";
 import { SlackSender } from "./slack-sender";
 import { SlackUsersSync } from "./slack-users-sync";
 
-const connectBody = z.object({
+export const slackConnectBody = z.object({
   botToken: z.string().startsWith("xoxb-"),
   /** Enables /notify over Socket Mode (needs connections:write). */
   appToken: z.string().startsWith("xapp-").optional(),
@@ -48,7 +48,7 @@ export class AdminSlackController {
 
   @Put()
   async connect(@Param("tenantId", ParseUUIDPipe) tenantId: string, @Body() body: unknown) {
-    const { botToken, appToken } = parseBody(connectBody, body);
+    const { botToken, appToken } = parseBody(slackConnectBody, body);
     try {
       const connection = await this.connections.connect(tenantId, botToken, appToken);
       await this.events.requestSync(tenantId);
@@ -58,9 +58,7 @@ export class AdminSlackController {
         botUserId: connection.botUserId,
       };
     } catch (err) {
-      if (err instanceof SlackApiError) {
-        throw new BadRequestException(`Slack rejected the token: ${err.code}`);
-      }
+      if (err instanceof SlackTokenRejectedError) throw new BadRequestException(err.message);
       throw err;
     }
   }

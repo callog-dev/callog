@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { CheckCircle2, CircleAlert, RefreshCw, Send, Hash, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -8,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { adminApi } from "@/lib/api";
 import { ago } from "@/lib/time";
+import { SlackConnectDialog, TelegramConnectDialog } from "./connect-channels";
 
 export function OverviewTab() {
   const status = useQuery({ queryKey: ["admin", "status"], queryFn: adminApi.status });
@@ -23,6 +25,8 @@ export function OverviewTab() {
     onError: (e) => toast.error(e.message),
   });
 
+  const [dialog, setDialog] = useState<"slack" | "telegram">();
+
   if (status.isPending) return <Skeleton className="h-48 w-full" />;
   if (status.isError) return <p className="text-destructive">{status.error.message}</p>;
   const s = status.data;
@@ -37,6 +41,10 @@ export function OverviewTab() {
 
   return (
     <div className="space-y-4">
+      {dialog === "slack" && <SlackConnectDialog onClose={() => setDialog(undefined)} />}
+      {dialog === "telegram" && (
+        <TelegramConnectDialog bot={s.telegram?.bot ?? null} onClose={() => setDialog(undefined)} />
+      )}
       {errors.length > 0 && (
         <Alert variant="destructive">
           <CircleAlert />
@@ -99,6 +107,7 @@ export function OverviewTab() {
                 ) : (
                   <span className="text-muted-foreground">Slack not connected</span>
                 )}
+                <ChangeButton connected={Boolean(s.slack)} onClick={() => setDialog("slack")} />
               </div>
               <div className="flex items-center gap-2">
                 <Send className="size-4" />
@@ -109,6 +118,10 @@ export function OverviewTab() {
                 ) : (
                   <span className="text-muted-foreground">Telegram not connected</span>
                 )}
+                <ChangeButton
+                  connected={Boolean(s.telegram)}
+                  onClick={() => setDialog("telegram")}
+                />
               </div>
             </CardTitle>
           </CardHeader>
@@ -168,5 +181,13 @@ export function OverviewTab() {
         </Card>
       )}
     </div>
+  );
+}
+
+function ChangeButton({ connected, onClick }: { connected: boolean; onClick: () => void }) {
+  return (
+    <Button size="sm" variant="ghost" className="ml-auto h-7 px-2" onClick={onClick}>
+      {connected ? "Change" : "Connect"}
+    </Button>
   );
 }
