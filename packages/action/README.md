@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: npm test
-      - uses: callog-dev/callog/packages/action@v0.1.0
+      - uses: callog-dev/callog/packages/action@v0.2.0
         if: failure()
         with:
           url: https://notify.company.internal

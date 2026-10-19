@@ -55,7 +55,7 @@ Going back further requires restoring the database backup taken before the upgra
 
 Only versions that need manual steps are listed here.
 
-### To the release after 0.1.2
+### 0.2.0
 
 - `ENCRYPTION_KEY` becomes required. If `.env` does not have it, add one
   (`openssl rand -base64 32`) before `up -d`, otherwise the server exits with a one-line hint.

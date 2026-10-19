@@ -5,7 +5,7 @@ versions follow [semver](https://semver.org/): a **minor** release is `docker co
 a **major** release needs the steps in [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
-## [Unreleased]
+## [0.2.0]
 
 ### Added
 

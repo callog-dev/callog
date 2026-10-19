@@ -22,7 +22,7 @@ import {
 import { adminApi, api, type NotificationDetails } from "@/lib/api";
 
 /** The release of the GitHub Action the snippet pins; bump it with every release. */
-const ACTION_REF = "callog-dev/callog/packages/action@v0.1.2";
+const ACTION_REF = "callog-dev/callog/packages/action@v0.2.0";
 const POLL_MS = 1_000;
 const FINAL = new Set(["delivered", "partially_failed", "failed"]);
 

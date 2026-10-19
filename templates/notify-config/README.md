@@ -19,7 +19,7 @@ There are no logins or emails here: people link their accounts in Callog.
 Then rename the route to what it announces and send to it from a workflow:
 
 ```yaml
-- uses: callog-dev/callog/packages/action@v0.1.2
+- uses: callog-dev/callog/packages/action@v0.2.0
   with:
     url: https://callog.acme.dev # your Callog address
     route: hello

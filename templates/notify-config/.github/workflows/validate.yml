@@ -10,4 +10,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: callog-dev/callog/packages/cli@v0.1.2
+      - uses: callog-dev/callog/packages/cli@v0.2.0
