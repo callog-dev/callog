@@ -1,11 +1,13 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { DB, type Db } from "../src/db/db";
+import { DeliveryService } from "../src/delivery/delivery.service";
 import { deliveries, notifications, tenants } from "../src/db/schema";
 import { PeopleService } from "../src/identity/people.service";
 import { TenantConfigService } from "../src/tenant-config/tenant-config.service";
 import type { FakeGithub } from "./setup/fake-github";
-import { GOOD_SLACK_TOKEN } from "./setup/fake-slack";
+import { GOOD_SLACK_TOKEN, type FakeSlack } from "./setup/fake-slack";
 import { activateConfig, createTenant, createTestApp } from "./setup/test-app";
 import { webLogin } from "./setup/web-login";
 
@@ -20,6 +22,7 @@ template: [{ text: hi }]`,
 describe("first sign-in and the Getting started checklist (integration)", () => {
   let app: NestFastifyApplication;
   let github: FakeGithub;
+  let slack: FakeSlack;
   let githubOAuthUsers: Map<string, { id: number; login: string }>;
   let adminRequest: Awaited<ReturnType<typeof createTestApp>>["adminRequest"];
   let db: Db;
@@ -32,7 +35,7 @@ describe("first sign-in and the Getting started checklist (integration)", () => 
     app.inject({ method, url, headers: { cookie }, ...(payload ? { payload } : {}) });
 
   beforeAll(async () => {
-    ({ app, github, githubOAuthUsers, adminRequest } = await createTestApp());
+    ({ app, github, slack, githubOAuthUsers, adminRequest } = await createTestApp());
     db = app.get(DB);
   });
   afterAll(() => app?.close());
@@ -133,6 +136,50 @@ describe("first sign-in and the Getting started checklist (integration)", () => 
       "bad 2",
       "bad 3",
     ]);
+  });
+
+  it("sends a test through the pipeline and mentions whoever pressed it", async () => {
+    await app.get(PeopleService).linkAccounts(tenantId, {
+      displayName: "Olga",
+      accounts: [
+        { provider: "slack", externalId: "UOLGA", source: "sync", confidence: "verified" },
+        {
+          provider: "github",
+          externalId: String(owner.id),
+          handle: owner.login,
+          source: "oauth",
+          confidence: "verified",
+        },
+      ],
+    });
+    await adminRequest("PUT", `/admin/tenants/${tenantId}/slack`, { botToken: GOOD_SLACK_TOKEN });
+    // Only a repository may send here: an admin test is still allowed.
+    await activateConfig(app, tenantId, {
+      "routes/hello.yaml": `
+id: hello
+allowed_sources: { github_repos: [acme/web] }
+destinations: [{ slack: "#alerts" }]
+template: [{ text: "{{ data.text }} {{ recipients | mention }}" }]
+examples: [{ data: { text: Hi } }]`,
+    });
+    const cookie = await webLogin(app, githubOAuthUsers, owner);
+    slack.posted = [];
+
+    const res = await call("POST", "/api/admin/routes/hello/test", cookie);
+    expect(res.statusCode).toBe(201);
+    const { notificationId } = res.json();
+    expect(
+      await app.get(DeliveryService).deliver(notificationId, { attempt: 1, maxAttempts: 8 }),
+    ).toBe("delivered");
+    expect(slack.posted[0]!.message.text).toBe("Hi <@UOLGA>");
+    const [n] = await db.select().from(notifications).where(eq(notifications.id, notificationId));
+    expect(n!.source).toEqual({ type: "admin_test", actor: `@${owner.login}` });
+    expect(
+      (await call("GET", "/api/admin/onboarding", cookie)).json().steps.firstNotification,
+    ).toEqual({
+      done: true,
+    });
+    expect((await call("POST", "/api/admin/routes/nope/test", cookie)).statusCode).toBe(404);
   });
 
   it("walks the checklist from a fresh install to complete", async () => {

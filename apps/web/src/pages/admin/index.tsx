@@ -6,6 +6,7 @@ import { DeliveriesTab } from "./deliveries";
 import { GettingStarted } from "./getting-started";
 import { OverviewTab } from "./overview";
 import { PeopleTab } from "./people";
+import { SettingsTab } from "./settings";
 import { TeamsTab } from "./teams";
 
 export function AdminPage({ me }: { me: Me }) {
@@ -20,6 +21,7 @@ export function AdminPage({ me }: { me: Me }) {
           <TabsTrigger value="teams">Teams</TabsTrigger>
           <TabsTrigger value="admins">Admins</TabsTrigger>
           <TabsTrigger value="api-keys">API keys</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
           <OverviewTab />
@@ -38,6 +40,9 @@ export function AdminPage({ me }: { me: Me }) {
         </TabsContent>
         <TabsContent value="api-keys">
           <ApiKeysTab />
+        </TabsContent>
+        <TabsContent value="settings">
+          <SettingsTab />
         </TabsContent>
       </Tabs>
     </div>

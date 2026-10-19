@@ -15,14 +15,22 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { parseRef, type ConfigIssue, type Ref } from "@callog/config-schema";
+import { ownValue, parseRef, type ConfigIssue, type Ref } from "@callog/config-schema";
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { parseBody } from "../admin/parse-body";
 import { DB, type Db } from "../db/db";
-import { deliveries, identities, notifications, persons, unmappedRecipients } from "../db/schema";
+import {
+  deliveries,
+  identities,
+  notifications,
+  persons,
+  unmappedRecipients,
+  USABLE_CONFIDENCE,
+} from "../db/schema";
 import { GithubAppService } from "../github/github-app.service";
 import { PeopleService } from "../identity/people.service";
+import { NotificationsService } from "../notifications/notifications.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
 import { apiKeyNameSchema, ApiKeysService } from "../producers/api-keys.service";
 import { slackConnectBody } from "../slack/admin-slack.controller";
@@ -77,6 +85,7 @@ export class AdminApiController {
     private readonly admins: TenantAdminsService,
     private readonly adminCheck: AdminCheck,
     private readonly resolver: RecipientResolver,
+    private readonly pipeline: NotificationsService,
   ) {}
 
   // ---- Teams ----
@@ -361,6 +370,38 @@ export class AdminApiController {
 
   // ---- Config and integrations ----
 
+  // ---- Test notification ----
+
+  /**
+   * Sends the route's first example through the normal pipeline, mentioning whoever pressed
+   * the button: it proves the config, the channels and the person's links at once.
+   */
+  @Post("routes/:routeId/test")
+  async testRoute(@Req() req: SessionRequest, @Param("routeId") routeId: string) {
+    const session = req.session!;
+    const route = ownValue(
+      (await this.configs.getActive(session.tenantId))?.config.routes ?? {},
+      routeId,
+    );
+    if (!route) throw new NotFoundException(`Route "${routeId}" is not in the active config`);
+    const login =
+      session.githubLogin ?? (await this.githubLoginOf(session.tenantId, session.personId!));
+    const { notificationId } = await this.pipeline.accept(
+      {
+        tenantId: session.tenantId,
+        source: { type: "admin_test", actor: login ? `@${login}` : "an admin" },
+        label: "A test from the admin UI",
+      },
+      {
+        route: route.id,
+        data: route.examples[0]?.data ?? {},
+        recipients: login ? [`github:${login}`] : [],
+        update: false,
+      },
+    );
+    return { notificationId };
+  }
+
   // ---- Channels ----
 
   /** Both tokens: the bot token posts, the app-level one runs /notify over Socket Mode. */
@@ -465,7 +506,9 @@ export class AdminApiController {
       )
       .groupBy(notifications.status);
     return {
+      tenantId,
       org: tenant.githubOrgLogin,
+      installationId: tenant.githubInstallationId,
       configRepo: `${owner}/${repo}`,
       config: {
         active: active
@@ -495,6 +538,22 @@ export class AdminApiController {
   @Post("config/reload")
   reload(@Req() req: SessionRequest) {
     return this.loader.load(req.session!.tenantId);
+  }
+
+  private async githubLoginOf(tenantId: string, personId: string): Promise<string | undefined> {
+    const [account] = await this.db
+      .select({ handle: identities.handle })
+      .from(identities)
+      .where(
+        and(
+          eq(identities.tenantId, tenantId),
+          eq(identities.personId, personId),
+          eq(identities.provider, "github"),
+          inArray(identities.confidence, [...USABLE_CONFIDENCE]),
+        ),
+      )
+      .limit(1);
+    return account?.handle ?? undefined;
   }
 
   private async githubUser(

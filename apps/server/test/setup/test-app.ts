@@ -3,6 +3,7 @@ import type { INestApplication } from "@nestjs/common";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { parseConfigTree, type ConfigTree } from "@callog/config-schema";
 import { Test } from "@nestjs/testing";
+import { vi } from "vitest";
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { AppModule } from "../../src/app.module";
 import { GithubAppService } from "../../src/github/github-app.service";
@@ -24,6 +25,7 @@ import { FakeSlack } from "./fake-slack";
 import { FakeTelegram } from "./fake-telegram";
 import { createPool, DB, type Db } from "../../src/db/db";
 import { tenants } from "../../src/db/schema";
+import { InstallationEvents } from "../../src/tenants/installation-events";
 import { TenantConfigService } from "../../src/tenant-config/tenant-config.service";
 import { TEST_DATABASE_URL } from "./test-env";
 
@@ -99,6 +101,11 @@ export async function createTestApp(
     .overrideProvider(DESTINATION_RATE_LIMITER)
     .useValue(new DestinationRateLimiter({ default: 0, telegramGroup: 0 }))
     .compile();
+  // The startup reconcile runs in the background and deactivates every tenant the fake GitHub
+  // has no installation for, racing the tenants a test inserts. Tests reconcile explicitly.
+  vi.spyOn(moduleRef.get(InstallationEvents), "onApplicationBootstrap").mockImplementation(
+    () => {},
+  );
   const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), {
     rawBody: true,
   });

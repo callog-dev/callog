@@ -7,13 +7,12 @@ import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { adminApi, type Onboarding } from "@/lib/api";
 import { SlackConnectDialog, TelegramConnectDialog } from "./connect-channels";
-
-const README = "https://github.com/callog-dev/callog#self-hosting";
+import { TestNotificationDialog } from "./test-notification";
 
 /** Hidden once every required step is done; it reappears if something gets disconnected. */
 export function GettingStarted() {
   const onboarding = useQuery({ queryKey: ["admin", "onboarding"], queryFn: adminApi.onboarding });
-  const [dialog, setDialog] = useState<"slack" | "telegram">();
+  const [dialog, setDialog] = useState<Dialog>();
   if (!onboarding.data || onboarding.data.complete) return null;
   const { steps } = onboarding.data;
   const done = Object.values(steps).filter((s) => s.done).length;
@@ -45,6 +44,7 @@ export function GettingStarted() {
         </ol>
       </CardContent>
       {dialog === "slack" && <SlackConnectDialog onClose={() => setDialog(undefined)} />}
+      {dialog === "test" && <TestNotificationDialog onClose={() => setDialog(undefined)} />}
       {dialog === "telegram" && (
         <TelegramConnectDialog bot={steps.telegram.bot} onClose={() => setDialog(undefined)} />
       )}
@@ -52,12 +52,9 @@ export function GettingStarted() {
   );
 }
 
-function stepList(steps: Onboarding["steps"], open: (dialog: "slack" | "telegram") => void) {
-  const guide = (
-    <a className="underline underline-offset-4" href={README} target="_blank" rel="noreferrer">
-      see the setup guide
-    </a>
-  );
+type Dialog = "slack" | "telegram" | "test";
+
+function stepList(steps: Onboarding["steps"], open: (dialog: Dialog) => void) {
   return [
     {
       title: `GitHub App installed on ${steps.githubApp.org}`,
@@ -111,7 +108,14 @@ function stepList(steps: Onboarding["steps"], open: (dialog: "slack" | "telegram
     {
       title: "Send a first notification",
       done: steps.firstNotification.done,
-      hint: <>From a workflow or with an API key — {guide}.</>,
+      hint: steps.config.done
+        ? "Send a route's example to yourself, then copy the workflow step."
+        : "Needs a loaded config repo.",
+      action: (
+        <Button size="sm" disabled={!steps.config.done} onClick={() => open("test")}>
+          Send test
+        </Button>
+      ),
     },
   ] satisfies Step[];
 }

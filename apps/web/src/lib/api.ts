@@ -104,7 +104,10 @@ export interface NotificationRow {
   id: string;
   route: string;
   status: NotificationStatus;
-  source: { type: "github_oidc"; repository: string } | { type: "api_key"; apiKeyName: string };
+  source:
+    | { type: "github_oidc"; repository: string }
+    | { type: "api_key"; apiKeyName: string }
+    | { type: "admin_test"; actor: string };
   threadKey: string | null;
   createdAt: string;
   deliveries: DeliverySummary[];
@@ -182,6 +185,8 @@ export interface ApiKeyInfo {
 }
 
 export interface AdminStatus {
+  tenantId: string;
+  installationId: number | null;
   org: string;
   configRepo: string;
   config: {
@@ -241,6 +246,11 @@ export const adminApi = {
       `/api/admin/notifications?${q}`,
     );
   },
+  testRoute: (routeId: string) =>
+    request<{ notificationId: string }>(
+      "POST",
+      `/api/admin/routes/${encodeURIComponent(routeId)}/test`,
+    ),
   notification: (id: string) =>
     request<NotificationDetails>("GET", `/api/admin/notifications/${id}`),
   people: () => request<AdminPerson[]>("GET", "/api/admin/people"),

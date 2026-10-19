@@ -131,7 +131,9 @@ export const apiKeys = pgTable(
 
 export type NotificationSource =
   | { type: "github_oidc"; repository: string }
-  | { type: "api_key"; apiKeyId: string; apiKeyName: string };
+  | { type: "api_key"; apiKeyId: string; apiKeyName: string }
+  /** "Send test" in the admin UI; `actor` is who pressed it (`@login` or a person's name). */
+  | { type: "admin_test"; actor: string };
 
 export const notifications = pgTable(
   "notifications",

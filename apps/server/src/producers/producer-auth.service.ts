@@ -39,14 +39,15 @@ export class ProducerAuthService {
     return token.split(".").length === 3 ? this.fromOidc(token) : this.fromApiKey(token);
   }
 
-  /** 403 unless the route lists this producer in `allowed_sources`. */
+  /** 403 unless the route lists this producer in `allowed_sources`; admins may test any route. */
   assertAllowed(route: Route, producer: Producer): void {
     const { github_repos, api_keys } = route.allowed_sources;
     const source = producer.source;
     const allowed =
-      source.type === "github_oidc"
+      source.type === "admin_test" ||
+      (source.type === "github_oidc"
         ? github_repos.some((r) => r.toLowerCase() === source.repository.toLowerCase())
-        : api_keys.includes(source.apiKeyName);
+        : api_keys.includes(source.apiKeyName));
     if (!allowed) {
       throw new ForbiddenException(
         `${producer.label} is not in allowed_sources of route "${route.id}"`,

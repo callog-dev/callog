@@ -45,7 +45,11 @@ function StatusBadge({ status }: { status: NotificationStatus }) {
 }
 
 const source = (s: NotificationRow["source"]) =>
-  s.type === "github_oidc" ? s.repository : `key ${s.apiKeyName}`;
+  s.type === "github_oidc"
+    ? s.repository
+    : s.type === "api_key"
+      ? `key ${s.apiKeyName}`
+      : `test by ${s.actor}`;
 
 export function DeliveriesTab() {
   const [status, setStatus] = useState("all");

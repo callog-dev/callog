@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { IdentityModule } from "../identity/identity.module";
+import { NotificationsModule } from "../notifications/notifications.module";
 import { ProducersModule } from "../producers/producers.module";
 import { RoutingModule } from "../routing/routing.module";
 import { SlackModule } from "../slack/slack.module";
@@ -17,6 +18,7 @@ import { SessionsService } from "./sessions.service";
 @Module({
   imports: [
     IdentityModule,
+    NotificationsModule,
     TenantsModule,
     TenantConfigModule,
     ProducersModule,
