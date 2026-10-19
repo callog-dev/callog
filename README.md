@@ -9,10 +9,10 @@ with one person mapped across GitHub, Slack and Telegram.
 
 ## Self-hosting
 
-You need Docker and Postgres 14+. A Postgres is bundled in `docker-compose.yml` (profile `db`);
-for your own database (managed or your DBA's), poolers, TLS and operator-applied migrations see
-**[docs/setup.md](docs/setup.md)**. Upgrades: **[docs/upgrade.md](docs/upgrade.md)** and the
-[CHANGELOG](CHANGELOG.md).
+You need Docker and Postgres 14+ (one is bundled). The setup below takes about fifteen minutes:
+Callog walks you through the GitHub App, Slack and the config repo in the browser. For your own
+database, TLS, poolers, scripted setup and registering the App by hand, see
+**[docs/setup.md](docs/setup.md)**; upgrades — **[docs/upgrade.md](docs/upgrade.md)**.
 
 ### 1. Configure
 
@@ -20,29 +20,13 @@ for your own database (managed or your DBA's), poolers, TLS and operator-applied
 cp .env.example .env
 ```
 
-Fill in `.env` (leave everything else as is; empty lines mean "not set"):
+Set three lines in `.env` and leave the rest empty:
 
-| Variable                                           | How to get it                                                                        |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `ENCRYPTION_KEY`                                   | `openssl rand -base64 32` — encrypts Slack and Telegram tokens at rest               |
-| `ADMIN_TOKEN`                                      | `openssl rand -hex 24` — operator endpoints (`/admin/*`): connect Slack and Telegram |
-| `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`           | The GitHub App (below)                                                               |
-| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | The same App → _Client ID_ / _Generate a new client secret_: sign-in to the web UI   |
-| `GITHUB_APP_PRIVATE_KEY_FILE`                      | Path to the App's `.pem` on the host; mounted into the container                     |
-| `PUBLIC_URL`                                       | The URL people open in the browser, e.g. `https://callog.acme.dev`                   |
-| `APP_PORT`                                         | Host port to publish (default 3000)                                                  |
-| `CALLOG_IMAGE`                                     | A release image, e.g. `ghcr.io/callog-dev/callog:0.1.1`; empty = build from source   |
-| `DATABASE_URL`                                     | Only for your own Postgres ([docs/setup.md](docs/setup.md)); empty = bundled one     |
-
-**GitHub App** (org → Settings → Developer settings → GitHub Apps → New):
-
-- webhook URL `$PUBLIC_URL/webhooks/github` with a secret (to try it on a laptop, point it at a
-  [smee.io](https://smee.io) channel and forward it with `pnpm tunnel`, see Development);
-- callback URL `$PUBLIC_URL/oauth/github/callback`;
-- repository permissions _Contents: read_, _Metadata: read_; organization permission
-  _Members: read_; events _Push_ and _Organization_.
-
-Generate a private key, then install the App on the org — the installation becomes your tenant.
+```bash
+PUBLIC_URL=https://callog.acme.dev            # the address people will open; http://localhost:3000 to try it
+ENCRYPTION_KEY=...                            # openssl rand -base64 32 — keep it with your database backups
+CALLOG_IMAGE=ghcr.io/callog-dev/callog:0.2.0  # empty = build from source
+```
 
 ### 2. Start
 
@@ -51,72 +35,47 @@ docker compose --profile db --profile app up -d   # bundled Postgres
 docker compose --profile app up -d                # your Postgres in DATABASE_URL
 ```
 
-Add `--build` to build the image from source instead of `CALLOG_IMAGE`. The server checks and
-migrates the database on start; a problem with the database is one line in
-`docker compose logs app`. After a few seconds:
+The server checks and migrates the database on start; a problem is one line in
+`docker compose logs app`.
+
+### 3. Create the GitHub App
+
+Open `PUBLIC_URL` and follow the page: enter your GitHub organization (you need to be an owner)
+and confirm the App on GitHub. Callog shows its credentials **once**, as lines for `.env`. Add
+them, restart (`docker compose --profile app up -d`) and install the App on the organization.
+
+On a laptop GitHub cannot reach `localhost`: the page asks for a [smee.io](https://smee.io)
+channel to relay webhooks. Keep the relay running while you try Callog:
 
 ```bash
-CALLOG=http://localhost:3000   # your PUBLIC_URL; the examples below use it
-curl $CALLOG/readyz
-docker compose logs app | grep "Tenant "   # → Tenant <TENANT_ID> active for org "<org>"
+npx smee-client --url https://smee.io/<channel> --target http://localhost:3000/webhooks/github
 ```
 
-### 3. Connect Slack
+### 4. Follow the checklist
 
-Create a Slack App from [docs/setup/slack-app-manifest.yaml](docs/setup/slack-app-manifest.yaml),
-install it to your workspace and create an app-level token (`xapp-…`, scope `connections:write`)
-for `/notify` over Socket Mode. Then connect both tokens:
+Sign in with GitHub at `PUBLIC_URL`. Owners of the organization are admins; the **Getting
+started** checklist in Admin covers the rest:
 
-```bash
-curl -X PUT $CALLOG/admin/tenants/$TENANT_ID/slack \
-  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d '{"botToken":"xoxb-…","appToken":"xapp-…"}'
-```
+- **Slack** — a button creates Callog's Slack App from its manifest; paste its bot token and
+  app-level token. People are imported from Slack and matched to GitHub accounts.
+- **Your GitHub account** — run `/notify link github` in Slack, so notifications can mention
+  you. Everyone links their accounts the same way (`/notify link github`, `/notify link telegram`).
+- **Telegram** (optional) — paste a [@BotFather](https://t.me/BotFather) token; groups you add
+  the bot to show up with their ids.
+- **Config repo** — create `<org>/notify-config` from the
+  [template](https://github.com/callog-dev/notify-config-template). It holds routing only: no
+  logins or emails. Every push to its default branch is validated and loaded; an invalid config
+  is rejected and the previous one stays active.
+- **A first notification** — send a route's example to yourself and copy the
+  [GitHub Action](packages/action/README.md) step that sends it from a workflow.
 
-People are imported from Slack and matched to GitHub accounts automatically where possible.
-
-**Sign in to the web UI.** Sign-in is with GitHub, so your GitHub account must be linked first:
-run `/notify link github` in Slack, open the link and confirm, then sign in at `$PUBLIC_URL`.
-GitHub org owners are admins (`/manage`) and can grant the role to others there. Anyone can link
-their accounts the same way (`/notify link github`, `/notify link telegram`).
-
-### Connect Telegram (optional)
-
-Create a bot with @BotFather, connect it, then add it to a group — it posts the chat id to
-use as `telegram: "<id>"` in routes.
+Services send with an API key (Admin → API keys) named in the route's
+`allowed_sources.api_keys`:
 
 ```bash
-curl -X PUT $CALLOG/admin/tenants/$TENANT_ID/telegram \
-  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d '{"botToken":"123456:…"}'
-```
-
-### 4. Add a config repo
-
-Create `<org>/notify-config` with `config.yaml`, `teams.yaml` and `routes/*.yaml` — routing
-only: no logins or emails, people are linked in the UI. The
-[reference example](packages/config-schema/fixtures/valid) shows every file; validate changes
-in CI with the [config Action](packages/cli/README.md). It is loaded when the App is installed
-and on every push to its default branch; an invalid config is rejected and the previous one
-stays active.
-
-```bash
-curl $CALLOG/admin/tenants/$TENANT_ID/config -H "Authorization: Bearer $ADMIN_TOKEN"
-```
-
-### 5. Send
-
-From GitHub Actions use the [action](packages/action/README.md) (OIDC, no secrets). From a
-service, create an API key named as in the route's `allowed_sources.api_keys` (`ci` here); the
-response contains the key once:
-
-```bash
-curl -X POST $CALLOG/admin/tenants/$TENANT_ID/api-keys \
-  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"name":"ci"}'
-
-curl -X POST $CALLOG/v1/notify \
+curl -X POST $PUBLIC_URL/v1/notify \
   -H "Authorization: Bearer $NOTIFY_API_KEY" -H "Content-Type: application/json" \
-  -d '{"route":"e2e-failed","data":{"branch":"main"},"recipients":["github:octocat"]}'
+  -d '{"route":"hello","data":{"text":"Deployed"},"recipients":["github:octocat"]}'
 ```
 
 ### Operating

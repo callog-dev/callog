@@ -5,6 +5,44 @@ versions follow [semver](https://semver.org/): a **minor** release is `docker co
 a **major** release needs the steps in [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
+## [Unreleased]
+
+### Added
+
+- First start in the browser: on a fresh install `PUBLIC_URL` opens a setup page that creates the
+  GitHub App in your organization with GitHub's manifest flow and shows its credentials once, as
+  lines for `.env`. The server does not store them; on a laptop the page sets up a smee.io relay
+  for webhooks.
+- Owners of the GitHub organization can sign in before their account is linked in Slack; they
+  reach the admin pages only, and their role changes are audited as `@login`.
+- A **Getting started** checklist in Admin, computed from what is actually set up: Slack,
+  linking your GitHub account, Telegram (optional), the config repo and a first notification.
+- Connecting Slack and Telegram from the UI. Slack starts from a link that creates the app from
+  its manifest; the Telegram dialog lists the groups the bot is in, with their ids.
+- A [config repo template](https://github.com/callog-dev/notify-config-template), a button that
+  creates `<org>/notify-config` from it and a "Load now" action.
+- "Send test": a route's example goes through the normal pipeline and mentions you; afterwards
+  the dialog shows the GitHub Action step for that route.
+- Admin → Settings shows the tenant ID.
+
+### Changed
+
+- `ENCRYPTION_KEY` is required: the server exits with one line saying how to generate it.
+- `ADMIN_TOKEN` is optional and only needed for scripted setup (`/admin/*`).
+- Connecting Slack also verifies the app-level token (`xapp-…`), through the UI and
+  `PUT /admin/tenants/:id/slack`; an error names the token Slack refused.
+- README: the setup goes through the browser; registering the App by hand and scripted setup
+  moved to [docs/setup.md](docs/setup.md).
+
+### Operator actions
+
+- If `ENCRYPTION_KEY` is not set, set it before upgrading (`openssl rand -base64 32`). An
+  installation with Slack or Telegram connected already has it.
+- Migrations `0011` and `0012` are applied at start. If your DBA applies migrations, also grant
+  the server's role access to the new table `telegram_chats` (the `ALTER DEFAULT PRIVILEGES` from
+  [docs/setup.md](docs/setup.md#5-migrations) covers it).
+- An existing `.env` needs no other change.
+
 ## [0.1.2]
 
 ### Fixed

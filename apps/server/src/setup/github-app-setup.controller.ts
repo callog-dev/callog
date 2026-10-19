@@ -74,7 +74,7 @@ export class GithubAppSetupController implements OnApplicationBootstrap {
     const relay = local
       ? `<label for="webhook">Webhook relay URL</label>
 <input id="webhook" name="webhook" type="url" required placeholder="https://smee.io/…">
-<small>GitHub cannot reach ${escapeHtml(this.publicUrl)}. Create a channel at <a href="https://smee.io/new">smee.io/new</a>, paste it here and forward it with <code>pnpm tunnel</code>.</small>`
+<small>GitHub cannot reach ${escapeHtml(this.publicUrl)}. Create a channel at <a href="https://smee.io/new">smee.io/new</a>, paste it here and keep it forwarded to this server with <code>npx smee-client --url &lt;channel&gt; --target ${escapeHtml(this.publicUrl)}/webhooks/github</code>.</small>`
       : "";
     return page(`<p>Create the GitHub App Callog uses to read your config repo and org members.
 You need to be an owner of the organization.</p>

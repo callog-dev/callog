@@ -53,4 +53,12 @@ Going back further requires restoring the database backup taken before the upgra
 
 ## 5. Version-specific steps
 
-Only versions that need manual steps are listed here. None so far.
+Only versions that need manual steps are listed here.
+
+### To the release after 0.1.2
+
+- `ENCRYPTION_KEY` becomes required. If `.env` does not have it, add one
+  (`openssl rand -base64 32`) before `up -d`, otherwise the server exits with a one-line hint.
+  An installation that has Slack or Telegram connected already has it.
+- With `MIGRATE_ON_START=false`, grant the server's role access to the new `telegram_chats`
+  table after applying the migrations (see [setup.md → Migrations](setup.md#5-migrations)).

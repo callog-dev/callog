@@ -2,8 +2,8 @@
 
 The step-by-step start (GitHub App, Slack, Telegram, config repo) is in the
 [README](../README.md#self-hosting). This page is for whoever runs the infrastructure and the
-database: what an installation consists of, what it needs from Postgres, and how to use your own
-database instead of the bundled one.
+database: what an installation consists of, what it needs from Postgres, how to use your own
+database instead of the bundled one, and how to set Callog up without the browser.
 
 ## 1. What an installation consists of
 
@@ -13,7 +13,9 @@ database instead of the bundled one.
 | Postgres  | All data, including the job queue (graphile-worker)                              | **the only** stateful piece |
 
 There are no other services: no Redis, no message broker. Backing up an installation means
-backing up Postgres, `.env` and the GitHub App private key.
+backing up Postgres and `.env` (with the GitHub App private key, or the `.pem` if you mount one).
+Keep `ENCRYPTION_KEY` with the database backups: the Slack and Telegram tokens in the database
+are encrypted with it and cannot be read without it.
 
 Run **one** `app` process with the worker (`ROLE=all` or `ROLE=worker`): Telegram long polling
 allows a single poller per bot. API-only processes (`ROLE=api`) can be scaled freely.
@@ -158,3 +160,60 @@ Logs: `docker compose logs app`.
 | `MIGRATE_ON_START`     | `true`  | `false` — an operator applies migrations, the server only checks |
 
 Upgrading: [upgrade.md](upgrade.md).
+
+## 8. Registering the GitHub App by hand
+
+The setup page creates the App with GitHub's manifest flow. If you cannot use it (no owner
+rights for the browser session, or the App is managed by another team), register it yourself:
+organization → Settings → Developer settings → GitHub Apps → New GitHub App.
+
+- Homepage URL: `$PUBLIC_URL`.
+- Callback URL: `$PUBLIC_URL/oauth/github/callback` (sign-in and `/notify link github`).
+- Webhook: active, URL `$PUBLIC_URL/webhooks/github`, a secret of your choice.
+- Repository permissions: _Contents: read_, _Metadata: read_. Organization permission:
+  _Members: read_. Events: _Push_, _Organization_.
+- Where it can be installed: only this account.
+
+Then generate a private key and a client secret, install the App on the organization and fill
+in `.env`:
+
+| Variable                                           | Where                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------ |
+| `GITHUB_APP_ID`                                    | The App's page → _App ID_                                                |
+| `GITHUB_WEBHOOK_SECRET`                            | The secret you set for the webhook                                       |
+| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | _Client ID_ / _Generate a new client secret_                             |
+| `GITHUB_APP_PRIVATE_KEY_FILE`                      | Host path of the downloaded `.pem`; compose mounts it into the container |
+
+Instead of a file, the key can go into `GITHUB_APP_PRIVATE_KEY` as one line with `\n` between
+its lines (that is what the setup page prints). Secrets managers (Vault, Kubernetes secrets)
+work the same way: the server only reads these variables at start.
+
+## 9. Setting up without the browser
+
+Everything the Admin pages do on first start is also an HTTP API for scripts, protected by
+`ADMIN_TOKEN` (`openssl rand -hex 24`; `/admin/*` answers 404 while it is not set). The tenant
+ID is in Admin → Settings, or in the log when the App installation is picked up
+(`docker compose logs app | grep "Tenant "`).
+
+```bash
+H="Authorization: Bearer $ADMIN_TOKEN"
+
+# Slack: bot token and the app-level token (connections:write) for /notify
+curl -X PUT $PUBLIC_URL/admin/tenants/$TENANT_ID/slack -H "$H" -H "Content-Type: application/json" \
+  -d '{"botToken":"xoxb-…","appToken":"xapp-…"}'
+
+# Telegram (optional)
+curl -X PUT $PUBLIC_URL/admin/tenants/$TENANT_ID/telegram -H "$H" -H "Content-Type: application/json" \
+  -d '{"botToken":"123456:…"}'
+
+# The active config, and loading the config repo now
+curl $PUBLIC_URL/admin/tenants/$TENANT_ID/config -H "$H"
+curl -X POST $PUBLIC_URL/admin/tenants/$TENANT_ID/config/reload -H "$H"
+
+# An API key for a service; the response contains the key once
+curl -X POST $PUBLIC_URL/admin/tenants/$TENANT_ID/api-keys -H "$H" -H "Content-Type: application/json" \
+  -d '{"name":"ci"}'
+```
+
+The Slack App is created from [setup/slack-app-manifest.yaml](setup/slack-app-manifest.yaml)
+(api.slack.com/apps → Create New App → From an app manifest).

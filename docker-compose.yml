@@ -9,7 +9,8 @@ services:
       POSTGRES_PASSWORD: notify
       POSTGRES_DB: notify
     ports:
-      - "5432:5432"
+      # Local tools only: the app reaches it over the compose network.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
       - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
