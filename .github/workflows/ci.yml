@@ -37,8 +37,54 @@ jobs:
       - run: pnpm test
       - run: pnpm test:int
 
-  docker:
+  chart:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: docker build -t callog:ci .
+      - uses: azure/setup-helm@v4
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      - name: Lint and validate
+        run: |
+          for values in "" charts/callog/ci/*.yaml; do
+            helm lint --strict charts/callog ${values:+-f "$values"}
+            helm template ci charts/callog ${values:+-f "$values"} \
+              | kubeconform -strict -summary -kubernetes-version 1.27.0 \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          done
+
+  # Builds the image and runs it from the chart in a kind cluster.
+  kubernetes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: callog:ci
+          cache-from: type=gha,scope=ci
+          cache-to: type=gha,scope=ci,mode=max
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: callog
+      - run: kind load docker-image callog:ci --name callog
+      - name: Install the chart
+        run: |
+          kubectl create namespace callog
+          kubectl -n callog apply -f charts/callog/examples/postgres.yaml
+          # --wait passes once every pod's readiness probe (/readyz) does.
+          helm install callog charts/callog -n callog --wait --timeout 5m \
+            -f charts/callog/ci/default-values.yaml \
+            --set image.repository=callog --set image.tag=ci --set image.pullPolicy=Never
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl -n callog get pods -o wide
+          kubectl -n callog describe pods
+          kubectl -n callog logs deploy/callog-worker --all-containers --tail=100 || true
+          kubectl -n callog logs deploy/callog-api --tail=100 || true
