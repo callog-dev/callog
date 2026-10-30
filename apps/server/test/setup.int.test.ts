@@ -106,13 +106,20 @@ describe("GitHub App setup without an App (integration)", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.headers["cache-control"]).toBe("no-store");
-    const block = decode(/<pre>([^<]*)<\/pre>/.exec(res.body)![1]!);
-    expect(parseEnv(block)).toEqual({
+    const [envFile, secret] = [...res.body.matchAll(/<pre>([^<]*)<\/pre>/g)].map((m) =>
+      parseEnv(decode(m[1]!)),
+    );
+    const lines = {
       GITHUB_APP_ID: "77",
       GITHUB_APP_PRIVATE_KEY: CREATED.pem,
       GITHUB_WEBHOOK_SECRET: "whsec-1",
       GITHUB_APP_CLIENT_ID: "Iv1.created",
       GITHUB_APP_CLIENT_SECRET: "cs-1",
+    };
+    expect(envFile).toEqual(lines);
+    expect(secret).toEqual({
+      ...lines,
+      GITHUB_APP_PRIVATE_KEY: Buffer.from(CREATED.pem).toString("base64"),
     });
     expect(res.body).toContain('href="https://github.com/apps/callog-acme/installations/new"');
     expect(res.body).toContain("or your Kubernetes Secret");

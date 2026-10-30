@@ -94,14 +94,18 @@ export interface CreatedGithubApp {
 }
 
 /**
- * `.env` lines for the created App. The key goes in as one line with `\n` escapes: both
- * docker compose and the server's own .env loader expand them in double quotes.
+ * `.env` lines for the created App. The key goes in as one line: with `\n` escapes, which both
+ * docker compose and the server's own .env loader expand in double quotes, or as base64 for
+ * Kubernetes Secrets and secret managers.
  */
-export function envBlock(app: CreatedGithubApp): string {
-  const pem = app.pem.trim().replace(/\r?\n/g, "\\n");
+export function envBlock(app: CreatedGithubApp, key: "pem" | "base64" = "pem"): string {
+  const privateKey =
+    key === "base64"
+      ? Buffer.from(app.pem).toString("base64")
+      : `"${app.pem.trim().replace(/\r?\n/g, "\\n")}\\n"`;
   return [
     `GITHUB_APP_ID=${app.id}`,
-    `GITHUB_APP_PRIVATE_KEY="${pem}\\n"`,
+    `GITHUB_APP_PRIVATE_KEY=${privateKey}`,
     `GITHUB_WEBHOOK_SECRET=${app.webhook_secret}`,
     `GITHUB_APP_CLIENT_ID=${app.client_id}`,
     `GITHUB_APP_CLIENT_SECRET=${app.client_secret}`,

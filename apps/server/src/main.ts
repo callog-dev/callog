@@ -10,6 +10,7 @@ import { SecretBox } from "./crypto/secret-box";
 import { createPool, poolOptions } from "./db/db";
 import { runAllMigrations } from "./db/migrate";
 import { checkDatabase, DatabasePreflightError } from "./db/preflight";
+import { loadGithubAppConfig } from "./github/github.config";
 
 // Development convenience: the repo-root .env (absent in containers). Real env vars win.
 const DOTENV = path.resolve(__dirname, "../../../.env");
@@ -28,6 +29,7 @@ async function bootstrap(): Promise<void> {
   }
   try {
     new SecretBox(env.ENCRYPTION_KEY);
+    loadGithubAppConfig(env);
   } catch (err) {
     console.error((err as Error).message);
     process.exit(1);

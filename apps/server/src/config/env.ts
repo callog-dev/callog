@@ -16,7 +16,7 @@ const envSchema = z.object({
   // GitHub App. Optional so the server can run without it in development;
   // GitHub features are disabled until all three are set.
   GITHUB_APP_ID: z.coerce.number().int().positive().optional(),
-  /** PEM contents; alternative to GITHUB_APP_PRIVATE_KEY_PATH (handy in containers). */
+  /** PEM or base64 of it; alternative to GITHUB_APP_PRIVATE_KEY_PATH (handy in containers). */
   GITHUB_APP_PRIVATE_KEY: z.string().min(1).optional(),
   GITHUB_APP_PRIVATE_KEY_PATH: z.string().min(1).optional(),
   GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(),

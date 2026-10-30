@@ -96,26 +96,33 @@ describe("buildManifest", () => {
 });
 
 describe("envBlock", () => {
-  it("survives a .env round trip into a working App config", () => {
-    const pem = generateKeyPairSync("rsa", { modulusLength: 2048 })
-      .privateKey.export({ type: "pkcs1", format: "pem" })
-      .toString();
-    const block = envBlock({
-      id: 42,
-      slug: "callog-acme",
-      html_url: "https://github.com/apps/callog-acme",
-      owner: { login: "acme" },
-      pem,
-      webhook_secret: "whsec",
-      client_id: "Iv1.abc",
-      client_secret: "cs",
-    });
-    const env = loadEnv({ DATABASE_URL: "postgres://u:p@db:5432/notify", ...parseEnv(block) });
-    expect(loadGithubAppConfig(env)).toEqual({
-      appId: 42,
-      privateKey: pem,
-      webhookSecret: "whsec",
-    });
-    expect(env.GITHUB_APP_CLIENT_ID).toBe("Iv1.abc");
-  });
+  const pem = generateKeyPairSync("rsa", { modulusLength: 2048 })
+    .privateKey.export({ type: "pkcs1", format: "pem" })
+    .toString();
+
+  it.each(["pem", "base64"] as const)(
+    "survives a round trip into a working App config (%s key)",
+    (key) => {
+      const block = envBlock(
+        {
+          id: 42,
+          slug: "callog-acme",
+          html_url: "https://github.com/apps/callog-acme",
+          owner: { login: "acme" },
+          pem,
+          webhook_secret: "whsec",
+          client_id: "Iv1.abc",
+          client_secret: "cs",
+        },
+        key,
+      );
+      const env = loadEnv({ DATABASE_URL: "postgres://u:p@db:5432/notify", ...parseEnv(block) });
+      expect(loadGithubAppConfig(env)).toEqual({
+        appId: 42,
+        privateKey: pem,
+        webhookSecret: "whsec",
+      });
+      expect(env.GITHUB_APP_CLIENT_ID).toBe("Iv1.abc");
+    },
+  );
 });

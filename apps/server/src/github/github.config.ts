@@ -22,7 +22,20 @@ export function loadGithubAppConfig(env: Env): GithubAppConfig | undefined {
   if (!privateKey || !env.GITHUB_WEBHOOK_SECRET) return undefined;
   return {
     appId: env.GITHUB_APP_ID,
-    privateKey: privateKey.replace(/\\n/g, "\n"),
+    privateKey: normalizePrivateKey(privateKey),
     webhookSecret: env.GITHUB_WEBHOOK_SECRET,
   };
+}
+
+/**
+ * The App's key as PEM (`\n` escapes expanded) or as base64 of the PEM: Kubernetes Secrets and
+ * secret managers keep it on one line. Throws with a one-line message for anything else.
+ */
+export function normalizePrivateKey(value: string): string {
+  if (value.includes("-----BEGIN")) return value.replace(/\\n/g, "\n");
+  const decoded = Buffer.from(value.replace(/\s+/g, ""), "base64").toString("utf8");
+  if (decoded.includes("-----BEGIN") && decoded.includes("PRIVATE KEY")) return decoded;
+  throw new Error(
+    "GITHUB_APP_PRIVATE_KEY (or the file at GITHUB_APP_PRIVATE_KEY_PATH) is neither a PEM key nor base64 of one",
+  );
 }

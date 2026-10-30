@@ -163,7 +163,8 @@ ${pathWarning}
     return page(`<p>✅ GitHub App <b>${escapeHtml(app.slug)}</b> is created.
 This page is the only time its private key and secrets are shown.</p>
 <ol>
-<li>Fill in the empty GitHub App lines in <code>.env</code> (or your Kubernetes Secret) with these values and restart the server:<pre>${escapeHtml(envBlock(app))}</pre></li>
+<li>Fill in the empty GitHub App lines in <code>.env</code> (or your Kubernetes Secret) with these values and restart the server:<pre>${escapeHtml(envBlock(app))}</pre>
+For Kubernetes Secrets and secret managers, the same with the key in base64 on one line:<pre>${escapeHtml(envBlock(app, "base64"))}</pre></li>
 <li><a href="${escapeHtml(installUrl)}">Install the App</a> on ${escapeHtml(app.owner?.login ?? "your organization")} — it becomes your Callog workspace.</li>
 <li>Open <a href="/">Callog</a> and sign in with GitHub.</li>
 </ol>
