@@ -1,0 +1,29 @@
+{{- with .Values.metrics.podMonitor }}
+{{- if .enabled }}
+{{- /* Both api and worker pods: deliveries are counted where the queue runs. */}}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "callog.fullname" $ }}
+  labels:
+    {{- include "callog.labels" $ | nindent 4 }}
+    {{- with .labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "callog.selectorLabels" $ | nindent 6 }}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .interval }}
+      {{- if .bearerToken }}
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ include "callog.secretName" $ }}
+          key: METRICS_TOKEN
+      {{- end }}
+{{- end }}
+{{- end }}

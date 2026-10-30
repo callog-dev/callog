@@ -1,0 +1,25 @@
+existingSecret: callog-secrets
+env:
+  LOG_LEVEL: debug
+ingress:
+  enabled: true
+  className: nginx
+  host: callog.example.com
+  annotations:
+    nginx.ingress.kubernetes.io/whitelist-source-range: 10.0.0.0/8
+  tls:
+    - hosts: [callog.example.com]
+      secretName: callog-tls
+webhookIngress:
+  enabled: true
+  className: nginx
+  host: callog-hooks.example.com
+worker:
+  nodeSelector:
+    node-lifecycle: on-demand
+migrations:
+  enabled: false
+metrics:
+  podMonitor:
+    enabled: true
+    bearerToken: true

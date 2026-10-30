@@ -1,0 +1,8 @@
+{{- if .Values.ingress.enabled }}
+{{- include "callog.ingress" (dict "root" $ "values" .Values.ingress "name" (include "callog.fullname" .) "path" "/" "pathType" "Prefix") }}
+{{- end }}
+{{- if .Values.webhookIngress.enabled }}
+---
+{{- /* The webhook host serves GitHub's deliveries and nothing else. */}}
+{{- include "callog.ingress" (dict "root" $ "values" .Values.webhookIngress "name" (printf "%s-webhooks" (include "callog.fullname" .)) "path" (include "callog.webhookPath" .) "pathType" "Exact") | nindent 0 }}
+{{- end }}

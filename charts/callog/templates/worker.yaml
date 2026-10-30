@@ -1,0 +1,19 @@
+{{- $ctx := dict "root" $ "role" "worker" "spec" .Values.worker }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "callog.fullname" . }}-worker
+  labels:
+    {{- include "callog.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  # Exactly one: a second worker would answer Slack and Telegram twice. Recreate stops the old
+  # pod before the new one starts, and only this pod applies migrations.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "callog.componentSelectorLabels" $ctx | nindent 6 }}
+  template:
+    {{- include "callog.podTemplate" $ctx | nindent 4 }}

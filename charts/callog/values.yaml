@@ -1,0 +1,94 @@
+image:
+  repository: ghcr.io/callog-dev/callog
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# The address people open Callog at. Defaults to https://<ingress.host> when the ingress is on.
+publicUrl: ""
+# Where GitHub delivers webhooks, used when the setup page creates the App. Defaults to
+# https://<webhookIngress.host>/webhooks/github when the webhook ingress is on.
+githubWebhookUrl: ""
+
+# Plain environment variables (not secrets), e.g. LOG_LEVEL, OIDC_AUDIENCE.
+env: {}
+# Secret environment variables, stored in a Secret the chart creates: DATABASE_URL,
+# ENCRYPTION_KEY, GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY (PEM or base64), GITHUB_WEBHOOK_SECRET,
+# GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, METRICS_TOKEN, ...
+secretEnv: {}
+# Use your own Secret with the same keys instead; secretEnv is then ignored.
+existingSecret: ""
+# More sources for the environment, e.g. [{ configMapRef: { name: callog-extra } }].
+extraEnvFrom: []
+
+api:
+  # HTTP: UI, API, webhooks. Upgrades keep it up with one replica; a second one also covers a
+  # node failure or eviction (see README).
+  replicas: 1
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Queue, Slack Socket Mode and Telegram polling: always exactly one replica (see README).
+worker:
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Applies migrations in an init container of the worker. Turn off when your DBA applies them.
+migrations:
+  enabled: true
+  resources: {}
+
+serviceAccount:
+  create: true
+  # Defaults to the release's full name.
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+priorityClassName: ""
+# Slack Socket Mode and Telegram polling close cleanly on SIGTERM.
+terminationGracePeriodSeconds: 30
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+
+# UI, API and OAuth.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+
+# A separate host that only serves /webhooks/github, so the UI can stay internal.
+webhookIngress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+
+metrics:
+  # A Prometheus Operator PodMonitor for the api and worker pods.
+  podMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+    # Send METRICS_TOKEN from the Secret when /metrics requires it.
+    bearerToken: false

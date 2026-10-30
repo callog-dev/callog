@@ -1,0 +1,19 @@
+{{- $ctx := dict "root" $ "role" "api" "spec" .Values.api }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "callog.fullname" . }}-api
+  labels:
+    {{- include "callog.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "callog.componentSelectorLabels" $ctx | nindent 6 }}
+  template:
+    {{- include "callog.podTemplate" $ctx | nindent 4 }}

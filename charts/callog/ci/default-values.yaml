@@ -1,0 +1,4 @@
+secretEnv:
+  DATABASE_URL: postgres://callog:callog@postgres:5432/callog
+  # Test-only value (base64 of "0123456789abcdef0123456789abcdef"), never use it for real.
+  ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= # gitleaks:allow

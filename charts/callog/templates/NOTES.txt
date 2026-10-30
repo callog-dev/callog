@@ -1,0 +1,24 @@
+Callog {{ .Chart.AppVersion }} is installed as "{{ .Release.Name }}".
+{{- if not (or .Values.existingSecret .Values.secretEnv) }}
+
+WARNING: neither secretEnv nor existingSecret is set. The server needs at least DATABASE_URL and
+ENCRYPTION_KEY and will not start without them.
+{{- end }}
+
+The worker applies migrations in its "migrate" init container{{ if not .Values.migrations.enabled }} (turned off: apply them yourself){{ end }}.
+API pods restart until migrations are applied; if the worker never starts (no node fits its
+nodeSelector or tolerations), they keep restarting:
+
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "callog.fullname" . }}-worker -c migrate
+{{- with include "callog.publicUrl" . }}
+
+Open {{ . }} to set up the GitHub App, Slack and the config repo.
+{{- else }}
+
+Set publicUrl (or ingress.host) to the address people open Callog at, then open it to set up the
+GitHub App, Slack and the config repo.
+{{- end }}
+{{- with include "callog.githubWebhookUrl" . }}
+GitHub will deliver webhooks to {{ . }} for an App created on that page.
+{{- end }}

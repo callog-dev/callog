@@ -3,3 +3,4 @@ coverage
 pnpm-lock.yaml
 LICENSE
 dist-action
+charts/*/templates

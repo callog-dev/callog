@@ -1,0 +1,17 @@
+apiVersion: v2
+name: callog
+description: Git-first routing for engineering notifications (GitHub, Slack, Telegram)
+type: application
+# Released together with the app: version = appVersion = the release.
+version: 0.2.0
+appVersion: "0.2.0"
+kubeVersion: ">=1.27-0"
+home: https://github.com/callog-dev/callog
+sources:
+  - https://github.com/callog-dev/callog
+annotations:
+  artifacthub.io/license: AGPL-3.0-only
+keywords:
+  - notifications
+  - slack
+  - github
