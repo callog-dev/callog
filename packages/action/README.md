@@ -33,7 +33,7 @@ The route must allow the repository: `allowed_sources.github_repos: [org/repo]`.
 
 | Input             | Default  |                                                                             |
 | ----------------- | -------- | --------------------------------------------------------------------------- |
-| `url`             | —        | Callog server URL                                                           |
+| `url`             | —        | Callog server URL, reachable from the runner                                |
 | `route`           | —        | Route id (`routes/<id>.yaml`)                                               |
 | `data`            | `{}`     | JSON object for the template; validated against the route `schema`          |
 | `recipients`      |          | `github:login`, `team:slug`, `email:…`, comma or newline separated          |

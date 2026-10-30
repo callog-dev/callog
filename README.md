@@ -14,11 +14,14 @@ Callog walks you through the GitHub App, Slack and the config repo in the browse
 database, TLS, poolers, scripted setup and registering the App by hand, see
 **[docs/setup.md](docs/setup.md)**; upgrades — **[docs/upgrade.md](docs/upgrade.md)**.
 
-### 1. Configure
+### 1. Get the files
 
 ```bash
+git clone --branch v0.2.0 --depth 1 https://github.com/callog-dev/callog && cd callog
 cp .env.example .env
 ```
+
+### 2. Configure
 
 Set three lines in `.env` and leave the rest empty:
 
@@ -28,7 +31,7 @@ ENCRYPTION_KEY=...                            # openssl rand -base64 32 — keep
 CALLOG_IMAGE=ghcr.io/callog-dev/callog:0.2.0  # empty = build from source
 ```
 
-### 2. Start
+### 3. Start
 
 ```bash
 docker compose --profile db --profile app up -d   # bundled Postgres
@@ -38,7 +41,7 @@ docker compose --profile app up -d                # your Postgres in DATABASE_UR
 The server checks and migrates the database on start; a problem is one line in
 `docker compose logs app`.
 
-### 3. Create the GitHub App
+### 4. Create the GitHub App
 
 Open `PUBLIC_URL` and follow the page: enter your GitHub organization (you need to be an owner)
 and confirm the App on GitHub. Callog shows its credentials **once**, as lines for `.env`. Add
@@ -51,7 +54,7 @@ channel to relay webhooks. Keep the relay running while you try Callog:
 npx smee-client --url https://smee.io/<channel> --target http://localhost:3000/webhooks/github
 ```
 
-### 4. Follow the checklist
+### 5. Follow the checklist
 
 Sign in with GitHub at `PUBLIC_URL`. Owners of the organization are admins; the **Getting
 started** checklist in Admin covers the rest:
@@ -67,7 +70,9 @@ started** checklist in Admin covers the rest:
   logins or emails. Every push to its default branch is validated and loaded; an invalid config
   is rejected and the previous one stays active.
 - **A first notification** — send a route's example to yourself and copy the
-  [GitHub Action](packages/action/README.md) step that sends it from a workflow.
+  [GitHub Action](packages/action/README.md) step that sends it from a workflow. Its `url:` must
+  be reachable from the runner: on a laptop, use the address
+  `cloudflared tunnel --url http://localhost:3000` prints (smee relays only webhooks).
 
 Services send with an API key (Admin → API keys) named in the route's
 `allowed_sources.api_keys`:
@@ -77,6 +82,11 @@ curl -X POST $PUBLIC_URL/v1/notify \
   -H "Authorization: Bearer $NOTIFY_API_KEY" -H "Content-Type: application/json" \
   -d '{"route":"hello","data":{"text":"Deployed"},"recipients":["github:octocat"]}'
 ```
+
+### Kubernetes
+
+A Helm chart and the cluster setup, including a separate public host for webhooks, are in
+[docs/setup.md](docs/setup.md).
 
 ### Operating
 
