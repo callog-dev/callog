@@ -3,7 +3,14 @@ import { parseEnv } from "node:util";
 import { describe, expect, it } from "vitest";
 import { loadGithubAppConfig } from "../github/github.config";
 import { loadEnv } from "../config/env";
-import { buildManifest, defaultAppName, envBlock, isLocalUrl } from "./github-app-manifest";
+import {
+  buildManifest,
+  defaultAppName,
+  envBlock,
+  isLocalUrl,
+  isPublicHttpsUrl,
+  resolveWebhookUrl,
+} from "./github-app-manifest";
 
 describe("isLocalUrl", () => {
   it.each([
@@ -15,6 +22,55 @@ describe("isLocalUrl", () => {
     ["https://callog.acme.dev", false],
   ])("%s → %s", (url, local) => {
     expect(isLocalUrl(url)).toBe(local);
+  });
+});
+
+describe("isPublicHttpsUrl", () => {
+  it.each([
+    ["https://hooks.acme.dev/webhooks/github", true],
+    ["http://hooks.acme.dev/webhooks/github", false],
+    ["https://localhost/webhooks/github", false],
+    ["https://", false],
+    ["not a url", false],
+  ])("%s → %s", (url, ok) => {
+    expect(isPublicHttpsUrl(url)).toBe(ok);
+  });
+});
+
+describe("resolveWebhookUrl", () => {
+  const configured = "https://hooks.acme.dev/webhooks/github";
+  const relay = "https://smee.io/abc";
+
+  it("prefers GITHUB_WEBHOOK_URL, for a public and a local server alike", () => {
+    for (const publicUrl of ["https://callog.acme.dev", "http://localhost:3000"]) {
+      expect(resolveWebhookUrl({ publicUrl, configured, relay })).toEqual({
+        url: configured,
+        pathMismatch: false,
+      });
+    }
+  });
+
+  it("rejects a GITHUB_WEBHOOK_URL GitHub cannot reach and flags another path", () => {
+    const publicUrl = "https://callog.acme.dev";
+    expect(resolveWebhookUrl({ publicUrl, configured: "http://hooks.acme.dev/x" })).toEqual({
+      error: "configured",
+    });
+    expect(
+      resolveWebhookUrl({ publicUrl, configured: "https://hooks.acme.dev/github" }),
+    ).toMatchObject({ pathMismatch: true });
+  });
+
+  it("uses this server's endpoint for a public server", () => {
+    expect(resolveWebhookUrl({ publicUrl: "https://callog.acme.dev", relay })).toEqual({
+      url: "https://callog.acme.dev/webhooks/github",
+      pathMismatch: false,
+    });
+  });
+
+  it("needs a public relay for a local server", () => {
+    const publicUrl = "http://localhost:3000";
+    expect(resolveWebhookUrl({ publicUrl, relay })).toEqual({ url: relay, pathMismatch: false });
+    expect(resolveWebhookUrl({ publicUrl })).toEqual({ error: "relay" });
   });
 });
 

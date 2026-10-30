@@ -15,7 +15,9 @@ import { GITHUB_APP_CONFIG, type GithubAppConfig } from "./github.config";
 import { GithubWebhooksService } from "./github-webhooks.service";
 import { verifyWebhookSignature } from "./webhook-signature";
 
-@Controller("webhooks/github")
+export const GITHUB_WEBHOOK_PATH = "/webhooks/github";
+
+@Controller(GITHUB_WEBHOOK_PATH.slice(1))
 export class GithubWebhookController {
   constructor(
     @Inject(GITHUB_APP_CONFIG) private readonly config: GithubAppConfig | undefined,

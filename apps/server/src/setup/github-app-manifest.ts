@@ -1,3 +1,5 @@
+import { GITHUB_WEBHOOK_PATH } from "../github/github-webhook.controller";
+
 export const SETUP_PATH = "/setup/github-app";
 export const SETUP_CALLBACK_PATH = `${SETUP_PATH}/callback`;
 
@@ -17,6 +19,43 @@ export function isLocalUrl(url: string): boolean {
     host.endsWith(".localhost") ||
     host.endsWith(".test")
   );
+}
+
+/** A webhook address GitHub can deliver to. */
+export function isPublicHttpsUrl(url: string): boolean {
+  return URL.canParse(url) && url.startsWith("https://") && !isLocalUrl(url);
+}
+
+export type WebhookTarget =
+  | { url: string; pathMismatch: boolean }
+  /** `GITHUB_WEBHOOK_URL` is set to an address GitHub cannot reach. */
+  | { error: "configured" }
+  /** A local server without a usable relay: the operator has to enter one. */
+  | { error: "relay" };
+
+/**
+ * Where a new App sends webhooks: `GITHUB_WEBHOOK_URL` when set, the relay the operator
+ * entered for a local server, otherwise this server's own endpoint. `publicUrl` has no
+ * trailing slash.
+ */
+export function resolveWebhookUrl(options: {
+  publicUrl: string;
+  configured?: string;
+  relay?: string;
+}): WebhookTarget {
+  const { publicUrl, configured, relay } = options;
+  if (configured) {
+    if (!isPublicHttpsUrl(configured)) return { error: "configured" };
+    return {
+      url: configured,
+      pathMismatch: !new URL(configured).pathname.endsWith(GITHUB_WEBHOOK_PATH),
+    };
+  }
+  if (!isLocalUrl(publicUrl))
+    return { url: `${publicUrl}${GITHUB_WEBHOOK_PATH}`, pathMismatch: false };
+  return relay && isPublicHttpsUrl(relay)
+    ? { url: relay, pathMismatch: false }
+    : { error: "relay" };
 }
 
 /** App names are unique across GitHub, so the org goes into the default. */

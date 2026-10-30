@@ -25,6 +25,8 @@ const envSchema = z.object({
   GITHUB_APP_CLIENT_SECRET: z.string().min(1).optional(),
   /** Base URL users' browsers reach the server at (OAuth callbacks), e.g. https://notify.acme.dev */
   PUBLIC_URL: z.url().optional(),
+  /** Webhook address for an App the setup page creates, when not `PUBLIC_URL/webhooks/github`. */
+  GITHUB_WEBHOOK_URL: z.url().optional(),
   /** 32 bytes, base64 (`openssl rand -base64 32`). Encrypts provider secrets at rest. */
   ENCRYPTION_KEY: z.string().min(1).optional(),
   /**

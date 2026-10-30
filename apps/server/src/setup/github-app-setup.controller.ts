@@ -14,6 +14,7 @@ import { randomBytes } from "node:crypto";
 import { ENV, type Env } from "../config/env";
 import { safeEqual } from "../crypto/digest";
 import { GITHUB_APP_CONFIG, type GithubAppConfig } from "../github/github.config";
+import { GITHUB_WEBHOOK_PATH } from "../github/github-webhook.controller";
 import { clearCookie, cookie, readCookie } from "../web/cookies";
 import { escapeHtml, htmlDocument } from "../web/html";
 import {
@@ -24,7 +25,7 @@ import {
   buildManifest,
   defaultAppName,
   envBlock,
-  isLocalUrl,
+  resolveWebhookUrl,
   SETUP_PATH,
 } from "./github-app-manifest";
 
@@ -54,7 +55,14 @@ export class GithubAppSetupController implements OnApplicationBootstrap {
   ) {}
 
   onApplicationBootstrap(): void {
-    if (this.app) return;
+    if (this.app) {
+      if (this.env.GITHUB_WEBHOOK_URL) {
+        this.logger.log(
+          "GITHUB_WEBHOOK_URL only applies when the setup page creates the App; to move webhooks of an existing App, change its Webhook URL in the App's settings on GitHub",
+        );
+      }
+      return;
+    }
     const where = this.env.PUBLIC_URL
       ? `open ${this.publicUrl}${SETUP_PATH} to create one`
       : "set PUBLIC_URL, restart and open it in a browser to create one";
@@ -70,12 +78,14 @@ export class GithubAppSetupController implements OnApplicationBootstrap {
         `<p>Set <code>PUBLIC_URL</code> in <code>.env</code> to the address people open Callog at, restart the server and reload this page.</p>`,
       );
     }
-    const local = isLocalUrl(this.publicUrl);
-    const relay = local
-      ? `<label for="webhook">Webhook relay URL</label>
+    const target = this.webhookTarget();
+    if ("error" in target && target.error === "configured") return webhookUrlError();
+    const relay =
+      "error" in target
+        ? `<label for="webhook">Webhook relay URL</label>
 <input id="webhook" name="webhook" type="url" required placeholder="https://smee.io/…">
-<small>GitHub cannot reach ${escapeHtml(this.publicUrl)}. Create a channel at <a href="https://smee.io/new">smee.io/new</a>, paste it here and keep it forwarded to this server with <code>npx smee-client --url &lt;channel&gt; --target ${escapeHtml(this.publicUrl)}/webhooks/github</code>.</small>`
-      : "";
+<small>GitHub cannot reach ${escapeHtml(this.publicUrl)}. Create a channel at <a href="https://smee.io/new">smee.io/new</a>, paste it here and keep it forwarded to this server with <code>npx smee-client --url &lt;channel&gt; --target ${escapeHtml(this.publicUrl)}${GITHUB_WEBHOOK_PATH}</code>.</small>`
+        : "";
     return page(`<p>Create the GitHub App Callog uses to read your config repo and org members.
 You need to be an owner of the organization.</p>
 <form method="get" action="${SETUP_PATH}/new">
@@ -95,12 +105,16 @@ ${relay}
     this.pageHeaders(reply);
     if (!this.env.PUBLIC_URL) return this.start(reply);
     if (!org || !GITHUB_LOGIN.test(org)) return retry("That is not a GitHub organization name.");
-    const webhookUrl = isLocalUrl(this.publicUrl)
-      ? webhook && /^https:\/\//.test(webhook) && !isLocalUrl(webhook)
-        ? webhook
-        : undefined
-      : `${this.publicUrl}/webhooks/github`;
-    if (!webhookUrl) return retry("The webhook relay URL must be a public https:// address.");
+    const target = this.webhookTarget(webhook);
+    if ("error" in target) {
+      return target.error === "configured"
+        ? webhookUrlError()
+        : retry("The webhook relay URL must be a public https:// address.");
+    }
+    const webhookUrl = target.url;
+    const pathWarning = target.pathMismatch
+      ? `<p>⚠️ The path does not end with <code>${GITHUB_WEBHOOK_PATH}</code>: make sure your proxy forwards it there.</p>`
+      : "";
 
     const state = randomBytes(24).toString("base64url");
     reply.header("set-cookie", cookie(STATE_COOKIE, state, this.cookieOptions(STATE_TTL_S)));
@@ -112,6 +126,8 @@ ${relay}
     const action = `https://github.com/organizations/${org}/settings/apps/new?state=${state}`;
     return page(`<p>GitHub will ask you to confirm the App in <b>${escapeHtml(org)}</b>.
 You can change its name there.</p>
+<p>GitHub will send webhooks to <code>${escapeHtml(webhookUrl)}</code>.</p>
+${pathWarning}
 <form method="post" action="${escapeHtml(action)}">
 <input type="hidden" name="manifest" value="${escapeHtml(JSON.stringify(manifest))}">
 <button>Create on GitHub</button></form>
@@ -147,12 +163,19 @@ You can change its name there.</p>
     return page(`<p>✅ GitHub App <b>${escapeHtml(app.slug)}</b> is created.
 This page is the only time its private key and secrets are shown.</p>
 <ol>
-<li>Add these lines to <code>.env</code>:<pre>${escapeHtml(envBlock(app))}</pre></li>
-<li>Restart the server: <code>docker compose --profile app up -d</code>.</li>
+<li>Fill in the empty GitHub App lines in <code>.env</code> (or your Kubernetes Secret) with these values and restart the server:<pre>${escapeHtml(envBlock(app))}</pre></li>
 <li><a href="${escapeHtml(installUrl)}">Install the App</a> on ${escapeHtml(app.owner?.login ?? "your organization")} — it becomes your Callog workspace.</li>
 <li>Open <a href="/">Callog</a> and sign in with GitHub.</li>
 </ol>
 <p><small>Lost the key? Generate a new one and new secrets in the App's settings on GitHub.</small></p>`);
+  }
+
+  private webhookTarget(relay?: string) {
+    return resolveWebhookUrl({
+      publicUrl: this.publicUrl,
+      configured: this.env.GITHUB_WEBHOOK_URL,
+      relay,
+    });
   }
 
   private get publicUrl(): string {
@@ -182,6 +205,12 @@ This page is the only time its private key and secrets are shown.</p>
 
 function page(body: string): string {
   return htmlDocument(`<h1>Set up Callog</h1>${body}`);
+}
+
+function webhookUrlError(): string {
+  return page(
+    `<p>⚠️ <code>GITHUB_WEBHOOK_URL</code> must be a public https:// address GitHub can reach. Fix it in <code>.env</code>, restart the server and reload this page.</p>`,
+  );
 }
 
 function retry(message: string): string {

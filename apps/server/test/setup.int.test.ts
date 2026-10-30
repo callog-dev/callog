@@ -1,6 +1,7 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { parseEnv } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ENV, type Env } from "../src/config/env";
 import type { CreatedGithubApp } from "../src/setup/github-app-manifest";
 import { createTestApp } from "./setup/test-app";
 
@@ -114,6 +115,8 @@ describe("GitHub App setup without an App (integration)", () => {
       GITHUB_APP_CLIENT_SECRET: "cs-1",
     });
     expect(res.body).toContain('href="https://github.com/apps/callog-acme/installations/new"');
+    expect(res.body).toContain("or your Kubernetes Secret");
+    expect(res.body).not.toContain("docker compose");
   });
 
   it("does not exchange a code for a browser that did not start the flow", async () => {
@@ -138,6 +141,46 @@ describe("GitHub App setup without an App (integration)", () => {
       headers: { cookie },
     });
     expect(res.body).toContain("expired or was already used");
+  });
+});
+
+describe("GitHub App setup with GITHUB_WEBHOOK_URL (integration)", () => {
+  const HOOKS = "https://hooks.acme.dev/webhooks/github";
+  let app: NestFastifyApplication;
+  let env: Env;
+
+  beforeAll(async () => {
+    app = (await createTestApp({ githubApp: false })).app as NestFastifyApplication;
+    env = app.get(ENV);
+  });
+  afterAll(() => app.close());
+
+  it("puts it into the manifest and asks for no relay", async () => {
+    env.GITHUB_WEBHOOK_URL = HOOKS;
+    const start = await app.inject({ method: "GET", url: "/setup/github-app" });
+    expect(start.body).toContain('name="org"');
+    expect(start.body).not.toContain('name="webhook"');
+
+    const res = await app.inject({ method: "GET", url: "/setup/github-app/new?org=acme" });
+    const manifest = JSON.parse(decode(/name="manifest" value="([^"]*)"/.exec(res.body)![1]!));
+    expect(manifest.hook_attributes).toEqual({ url: HOOKS, active: true });
+    expect(res.body).toContain(`GitHub will send webhooks to <code>${HOOKS}</code>`);
+    expect(res.body).not.toContain("does not end with");
+  });
+
+  it("warns about a path other than /webhooks/github", async () => {
+    env.GITHUB_WEBHOOK_URL = "https://hooks.acme.dev/github";
+    const res = await app.inject({ method: "GET", url: "/setup/github-app/new?org=acme" });
+    expect(res.body).toContain("does not end with <code>/webhooks/github</code>");
+  });
+
+  it("explains why an address GitHub cannot reach does not work", async () => {
+    env.GITHUB_WEBHOOK_URL = "https://localhost/webhooks/github";
+    for (const url of ["/setup/github-app", "/setup/github-app/new?org=acme"]) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.body).toContain("<code>GITHUB_WEBHOOK_URL</code> must be a public https://");
+      expect(res.body).not.toContain('name="manifest"');
+    }
   });
 });
 
