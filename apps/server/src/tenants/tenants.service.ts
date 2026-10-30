@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { DB, type Db } from "../db/db";
 import { tenants } from "../db/schema";
 
@@ -15,7 +15,7 @@ export function configRepoOf(tenant: Tenant): { owner: string; repo: string } {
   return { owner: owner!, repo: repo! };
 }
 
-export type TenantActivatedListener = (tenant: Tenant) => Promise<void>;
+export type TenantChangedListener = (tenant: Tenant) => Promise<void>;
 
 export interface InstallationAccount {
   installationId: number;
@@ -27,18 +27,20 @@ export interface InstallationAccount {
 export class TenantsService {
   private readonly logger = new Logger(TenantsService.name);
 
-  private readonly activatedListeners: TenantActivatedListener[] = [];
+  private readonly changedListeners: TenantChangedListener[] = [];
 
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  /** Lets other modules react to a new or reactivated tenant (e.g. load its config). */
-  onActivated(listener: TenantActivatedListener): void {
-    this.activatedListeners.push(listener);
+  /** Lets other modules react to a new or reactivated tenant, or to a renamed org. */
+  onChanged(listener: TenantChangedListener): void {
+    this.changedListeners.push(listener);
   }
 
   /**
    * Creates the tenant for an installation, or reactivates it after an unsuspend or a
    * reinstall — a reinstall has a new installation id, so the org is matched by its id.
+   * Also picks up an org rename. Listeners only run when something changed, so the
+   * periodic reconcile does not reload every tenant.
    */
   async activateInstallation({
     installationId,
@@ -51,10 +53,14 @@ export class TenantsService {
       githubOrgLogin: orgLogin,
       status: "active" as const,
     };
-    const [previous] = await this.db
-      .select({ id: tenants.id })
-      .from(tenants)
-      .where(eq(tenants.githubOrgId, orgId));
+    const [previous] = await this.db.select().from(tenants).where(eq(tenants.githubOrgId, orgId));
+    if (
+      previous?.status === "active" &&
+      previous.githubInstallationId === installationId &&
+      previous.githubOrgLogin === orgLogin
+    ) {
+      return previous;
+    }
     const [tenant] = previous
       ? await this.db.update(tenants).set(values).where(eq(tenants.id, previous.id)).returning()
       : await this.db
@@ -62,11 +68,43 @@ export class TenantsService {
           .values(values)
           .onConflictDoUpdate({ target: tenants.githubInstallationId, set: values })
           .returning();
+    const renamed =
+      previous && previous.githubOrgLogin !== orgLogin
+        ? `, renamed from "${previous.githubOrgLogin}"`
+        : "";
     this.logger.log(
-      `Tenant ${tenant!.id} active for org "${orgLogin}" (installation ${installationId})`,
+      `Tenant ${tenant!.id} active for org "${orgLogin}" (installation ${installationId}${renamed})`,
     );
-    for (const listener of this.activatedListeners) await listener(tenant!);
+    await this.notifyChanged(tenant!);
     return tenant!;
+  }
+
+  /**
+   * An org was renamed: its tenant keeps the org id, only the login changes. Tenants whose
+   * org id is not recorded yet are matched by the installation. Status is left as is.
+   */
+  async renameOrg({ installationId, orgId, orgLogin }: InstallationAccount): Promise<void> {
+    const rows = await this.db
+      .update(tenants)
+      .set({ githubOrgLogin: orgLogin, githubOrgId: orgId })
+      .where(
+        and(
+          or(
+            eq(tenants.githubOrgId, orgId),
+            and(isNull(tenants.githubOrgId), eq(tenants.githubInstallationId, installationId)),
+          ),
+          ne(tenants.githubOrgLogin, orgLogin),
+        ),
+      )
+      .returning();
+    for (const tenant of rows) {
+      this.logger.log(`Tenant ${tenant.id}: org renamed to "${orgLogin}"`);
+      if (tenant.status === "active") await this.notifyChanged(tenant);
+    }
+  }
+
+  private async notifyChanged(tenant: Tenant): Promise<void> {
+    for (const listener of this.changedListeners) await listener(tenant);
   }
 
   /** Data is kept: uninstalling must not destroy identities or history (retention still applies). */

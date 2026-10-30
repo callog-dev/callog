@@ -26,7 +26,8 @@ export class ConfigEvents implements OnModuleInit, OnApplicationBootstrap {
       await this.loader.load((payload as { tenantId: string }).tenantId);
     });
     this.webhooks.on("push", (payload) => this.handlePush(payload as PushEvent));
-    this.tenants.onActivated((tenant) => this.requestReload(tenant.id));
+    // A renamed org changes the default config repo path (`<org>/notify-config`).
+    this.tenants.onChanged((tenant) => this.requestReload(tenant.id));
   }
 
   /** Catches up on pushes missed while the server was down. */

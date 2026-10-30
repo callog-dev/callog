@@ -21,14 +21,18 @@ import { QueueService } from "../src/queue/queue.service";
 import { RecipientResolver } from "../src/routing/recipient-resolver";
 import { SlackConnectionsService } from "../src/slack/slack-connections.service";
 import { TenantConfigService } from "../src/tenant-config/tenant-config.service";
+import { TenantsService } from "../src/tenants/tenants.service";
+import type { FakeGithub } from "./setup/fake-github";
 import { GOOD_SLACK_TOKEN, type FakeSlack } from "./setup/fake-slack";
 import { createTestApp, createTenant } from "./setup/test-app";
 
 const DAY = 86_400_000;
+const ORG_ID = 1401;
 
 describe("lifecycle and retention (integration)", () => {
   let app: NestFastifyApplication;
   let slack: FakeSlack;
+  let github: FakeGithub;
   let admin: Awaited<ReturnType<typeof createTestApp>>["adminRequest"];
   let sendWebhook: Awaited<ReturnType<typeof createTestApp>>["sendWebhook"];
   let db: Db;
@@ -36,7 +40,7 @@ describe("lifecycle and retention (integration)", () => {
   let config: Config;
 
   beforeAll(async () => {
-    ({ app, slack, adminRequest: admin, sendWebhook } = await createTestApp());
+    ({ app, slack, github, adminRequest: admin, sendWebhook } = await createTestApp());
     db = app.get(DB);
   });
 
@@ -47,7 +51,8 @@ describe("lifecycle and retention (integration)", () => {
   beforeEach(async () => {
     await db.delete(tenants);
     await db.execute(sql`delete from graphile_worker._private_jobs`);
-    tenantId = await createTenant(app, 1400);
+    tenantId = await createTenant(app, 1400, "acme", ORG_ID);
+    github.installations = [installation("acme")];
     await app.get(SlackConnectionsService).connect(tenantId, GOOD_SLACK_TOKEN);
     const parsed = parseConfigTree({
       "config.yaml": "retention_days: 7",
@@ -60,6 +65,23 @@ template: [{ text: hi }]`,
     if (!parsed.ok) throw new Error("bad fixture");
     config = parsed.config;
   });
+
+  const installation = (accountLogin: string) => ({
+    id: 1400,
+    accountId: ORG_ID,
+    accountLogin,
+    accountType: "Organization",
+    suspended: false,
+  });
+
+  const queuedTasks = async () => {
+    const { rows } = await db.execute<{ task_identifier: string }>(
+      sql`select task_identifier from graphile_worker.jobs order by task_identifier`,
+    );
+    return rows.map((r) => r.task_identifier);
+  };
+
+  const orgLogin = async () => (await app.get(TenantsService).findById(tenantId))?.githubOrgLogin;
 
   const statusOf = async (slackId: string) => {
     const [row] = await db
@@ -270,11 +292,35 @@ template: [{ text: hi }]`,
 
     it("fans the hourly sync out into per-tenant jobs", async () => {
       await app.get(LifecycleJobs).syncAll();
-      const { rows } = await db.execute<{ task_identifier: string }>(
-        sql`select task_identifier from graphile_worker.jobs order by task_identifier`,
-      );
-      expect(rows.map((r) => r.task_identifier)).toEqual(
-        expect.arrayContaining(["github.identity_sync", "slack.sync"]),
+      const tasks = await queuedTasks();
+      expect(tasks).toEqual(expect.arrayContaining(["github.identity_sync", "slack.sync"]));
+      // Nothing changed in the installation: the config is not reloaded every hour.
+      expect(tasks).not.toContain("config.load");
+    });
+  });
+
+  describe("GitHub org rename", () => {
+    it("updates the org login and reloads the config on organization.renamed", async () => {
+      const res = await sendWebhook("organization", {
+        action: "renamed",
+        changes: { login: { from: "acme" } },
+        installation: { id: 1400 },
+        organization: { id: ORG_ID, login: "acme-renamed" },
+      });
+
+      expect(res.json()).toEqual({ handled: true });
+      expect(await orgLogin()).toBe("acme-renamed");
+      expect(await queuedTasks()).toContain("config.load");
+    });
+
+    it("picks up a rename in the hourly sync when the webhook was missed", async () => {
+      github.installations = [installation("acme-renamed")];
+
+      await app.get(LifecycleJobs).syncAll();
+
+      expect(await orgLogin()).toBe("acme-renamed");
+      expect(await queuedTasks()).toEqual(
+        expect.arrayContaining(["config.load", "github.identity_sync"]),
       );
     });
   });

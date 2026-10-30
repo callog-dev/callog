@@ -5,6 +5,23 @@ versions follow [semver](https://semver.org/): a **minor** release is `docker co
 a **major** release needs the steps in [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
+## [Unreleased]
+
+### Fixed
+
+- A renamed GitHub organization is picked up without a restart: the `organization.renamed`
+  webhook updates the tenant's org login and reloads its config, and the hourly sync re-reads
+  the installations in case the webhook was missed. Before, the GitHub identity sync, team
+  expansion for `members_from`, org-owner admin checks and the default config repository
+  (`<org>/notify-config`) kept using the old name until the server was restarted.
+
+### Operator actions
+
+- After renaming a GitHub organization, update `allowed_sources.github_repos` in your routes to
+  the new `<org>/<repo>` names: GitHub signs OIDC tokens with the new repository name, and the
+  server does not rewrite your config repository. Until then, requests from those workflows are
+  rejected with 403.
+
 ## [0.2.0]
 
 ### Added

@@ -5,6 +5,7 @@ import { IdentityEvents } from "../identity/identity-events";
 import { PeopleService } from "../identity/people.service";
 import { QueueService } from "../queue/queue.service";
 import { SlackEvents } from "../slack/slack-events";
+import { InstallationEvents } from "../tenants/installation-events";
 import { TenantsService } from "../tenants/tenants.service";
 import { RetentionService } from "./retention.service";
 
@@ -27,6 +28,7 @@ export class LifecycleJobs implements OnModuleInit {
     private readonly people: PeopleService,
     private readonly retention: RetentionService,
     private readonly webhooks: GithubWebhooksService,
+    private readonly installations: InstallationEvents,
   ) {}
 
   onModuleInit(): void {
@@ -41,8 +43,12 @@ export class LifecycleJobs implements OnModuleInit {
     );
   }
 
-  /** Fans out to per-tenant jobs, so one broken workspace does not block the others. */
+  /**
+   * Fans out to per-tenant jobs, so one broken workspace does not block the others.
+   * Reconciles installations first: an org rename whose webhook was missed heals here.
+   */
   async syncAll(): Promise<void> {
+    await this.installations.reconcileIfEnabled();
     for (const tenant of await this.tenants.listActive()) {
       await this.slackEvents.requestSync(tenant.id);
       await this.identityEvents.requestGithubSync(tenant.id);

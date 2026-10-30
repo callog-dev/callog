@@ -1,10 +1,10 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleInit } from "@nestjs/common";
-import type { InstallationEvent } from "@octokit/webhooks-types";
+import type { InstallationEvent, OrganizationEvent } from "@octokit/webhooks-types";
 import { GithubAppService } from "../github/github-app.service";
 import { GithubWebhooksService } from "../github/github-webhooks.service";
 import { TenantsService } from "./tenants.service";
 
-/** Keeps tenants in sync with GitHub App installations (tenant = installation). */
+/** Keeps tenants in sync with GitHub App installations (tenant = installation) and org renames. */
 @Injectable()
 export class InstallationEvents implements OnModuleInit, OnApplicationBootstrap {
   private readonly logger = new Logger(InstallationEvents.name);
@@ -17,15 +17,26 @@ export class InstallationEvents implements OnModuleInit, OnApplicationBootstrap 
 
   onModuleInit(): void {
     this.webhooks.on("installation", (payload) => this.handle(payload as InstallationEvent));
+    this.webhooks.on("organization", (payload) =>
+      this.onOrganization(payload as OrganizationEvent),
+    );
   }
 
-  /** Catches up on installations whose webhooks were missed (e.g. server was down). */
   onApplicationBootstrap(): void {
     if (!this.githubApp.enabled) {
       this.logger.warn("GitHub App is not configured: tenants will not be synced");
       return;
     }
-    void this.reconcile().catch((err: unknown) =>
+    void this.reconcileIfEnabled();
+  }
+
+  /**
+   * Catches up on installation and rename webhooks that were missed (e.g. server was down).
+   * Never throws: a failure is logged and the next run retries.
+   */
+  async reconcileIfEnabled(): Promise<void> {
+    if (!this.githubApp.enabled) return;
+    await this.reconcile().catch((err: unknown) =>
       this.logger.error(`Installation reconcile failed: ${String(err)}`),
     );
   }
@@ -41,6 +52,15 @@ export class InstallationEvents implements OnModuleInit, OnApplicationBootstrap 
       });
     }
     await this.tenants.deactivateAllExcept(active.map((i) => i.id));
+  }
+
+  private async onOrganization(event: OrganizationEvent): Promise<void> {
+    if (event.action !== "renamed" || !event.installation) return;
+    await this.tenants.renameOrg({
+      installationId: event.installation.id,
+      orgId: event.organization.id,
+      orgLogin: event.organization.login,
+    });
   }
 
   private async handle(event: InstallationEvent): Promise<void> {

@@ -4,6 +4,6 @@ import { TenantsService } from "./tenants.service";
 
 @Module({
   providers: [TenantsService, InstallationEvents],
-  exports: [TenantsService],
+  exports: [TenantsService, InstallationEvents],
 })
 export class TenantsModule {}
