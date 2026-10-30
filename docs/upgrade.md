@@ -6,7 +6,8 @@
   the tags `X.Y.Z`, `X.Y` and `latest`, and a GitHub Release with notes from
   [CHANGELOG.md](../CHANGELOG.md) and an archive of the SQL migrations.
 - **semver:**
-  - **patch / minor** (`1.4.2 → 1.5.0`) — no action needed: `pull && up -d`;
+  - **patch / minor** (`1.4.2 → 1.5.0`) — no action beyond a [regular upgrade](#2-regular-upgrade)
+    (`pull && up -d`, or `helm upgrade`);
   - **major** (`1.x → 2.0`) — read the version's section below before upgrading.
 - Every release in the CHANGELOG has an **Operator actions** section, even when it says "none".
 - A new required service (should one ever appear) only arrives in a major version, and only
@@ -32,6 +33,15 @@ then `up -d`.
 
 Avoid the `latest` tag in production: any `pull` would upgrade.
 
+**With Helm**, the chart version is the release version:
+
+```bash
+helm upgrade callog oci://ghcr.io/callog-dev/charts/callog --version 1.5.0 -n callog -f values.yaml
+```
+
+The worker's init container applies the migrations before the new worker starts; api pods restart
+until they are applied.
+
 ## 3. Rolling back
 
 Migrations only go forward and stay compatible with the previous release, so you can roll the
@@ -41,6 +51,8 @@ image back by **one** version and keep the database:
 CALLOG_IMAGE=ghcr.io/callog-dev/callog:1.4.2
 docker compose --profile app up -d
 ```
+
+With Helm: `helm rollback callog -n callog` (the previous revision).
 
 Going back further requires restoring the database backup taken before the upgrade.
 

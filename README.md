@@ -86,7 +86,7 @@ curl -X POST $PUBLIC_URL/v1/notify \
 ### Kubernetes
 
 A Helm chart and the cluster setup, including a separate public host for webhooks, are in
-[docs/setup.md](docs/setup.md).
+[charts/callog/README.md](charts/callog/README.md).
 
 ### Operating
 

@@ -21,7 +21,7 @@ throwaway one.
 ```bash
 kubectl create namespace callog
 kubectl -n callog apply -f examples/postgres.yaml   # only to try it
-helm install callog oci://ghcr.io/callog-dev/charts/callog -n callog -f values.yaml
+helm install callog oci://ghcr.io/callog-dev/charts/callog --version X.Y.Z -n callog -f values.yaml
 ```
 
 A minimal `values.yaml`:
@@ -37,8 +37,10 @@ ingress:
 ```
 
 Open `https://callog.example.com` and follow the setup page. It creates the GitHub App and shows
-its credentials once, with the private key in base64 for a Secret. Add them to `secretEnv` (or
-your own Secret) and run `helm upgrade`: pods restart when the chart's Secret changes.
+its credentials once, with the private key in base64 for a Secret. Add them to `secretEnv` and
+run `helm upgrade`: pods restart when the chart's Secret changes. With your own Secret (below),
+`kubectl create secret generic … --from-env-file` takes the lines as printed; restart the pods
+yourself afterwards (`kubectl rollout restart deploy -l app.kubernetes.io/instance=callog`).
 
 ## Secrets
 

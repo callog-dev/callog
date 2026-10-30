@@ -3,7 +3,8 @@
 The step-by-step start (GitHub App, Slack, Telegram, config repo) is in the
 [README](../README.md#self-hosting). This page is for whoever runs the infrastructure and the
 database: what an installation consists of, what it needs from Postgres, how to use your own
-database instead of the bundled one, and how to set Callog up without the browser.
+database instead of the bundled one, how to set Callog up without the browser, and how to run it
+on [Kubernetes](#10-kubernetes-helm).
 
 ## 1. What an installation consists of
 
@@ -18,7 +19,8 @@ Keep `ENCRYPTION_KEY` with the database backups: the Slack and Telegram tokens i
 are encrypted with it and cannot be read without it.
 
 Run **one** `app` process with the worker (`ROLE=all` or `ROLE=worker`): Telegram long polling
-allows a single poller per bot. API-only processes (`ROLE=api`) can be scaled freely.
+allows a single poller per bot. API-only processes (`ROLE=api`) can be scaled freely; the
+[Helm chart](#10-kubernetes-helm) runs it that way.
 
 ## 2. Bundled Postgres or your own
 
@@ -169,7 +171,8 @@ organization → Settings → Developer settings → GitHub Apps → New GitHub 
 
 - Homepage URL: `$PUBLIC_URL`.
 - Callback URL: `$PUBLIC_URL/oauth/github/callback` (sign-in and `/notify link github`).
-- Webhook: active, URL `$PUBLIC_URL/webhooks/github`, a secret of your choice.
+- Webhook: active, a public address of `/webhooks/github` (usually `$PUBLIC_URL/webhooks/github`,
+  see [§10](#10-kubernetes-helm) for a separate host), a secret of your choice.
 - Repository permissions: _Contents: read_, _Metadata: read_. Organization permission:
   _Members: read_. Events: _Push_, _Organization_.
 - Where it can be installed: only this account.
@@ -184,9 +187,10 @@ in `.env`:
 | `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | _Client ID_ / _Generate a new client secret_                             |
 | `GITHUB_APP_PRIVATE_KEY_FILE`                      | Host path of the downloaded `.pem`; compose mounts it into the container |
 
-Instead of a file, the key can go into `GITHUB_APP_PRIVATE_KEY` as one line with `\n` between
-its lines (that is what the setup page prints). Secrets managers (Vault, Kubernetes secrets)
-work the same way: the server only reads these variables at start.
+Instead of a file, the key can go into `GITHUB_APP_PRIVATE_KEY`, either as one line with `\n`
+between its lines or as base64 of the `.pem` (`base64 < key.pem`); the setup page prints both.
+Secrets managers (Vault, Kubernetes Secrets) work the same way: the server only reads these
+variables at start.
 
 ## 9. Setting up without the browser
 
@@ -217,3 +221,16 @@ curl -X POST $PUBLIC_URL/admin/tenants/$TENANT_ID/api-keys -H "$H" -H "Content-T
 
 The Slack App is created from [setup/slack-app-manifest.yaml](setup/slack-app-manifest.yaml)
 (api.slack.com/apps → Create New App → From an app manifest).
+
+## 10. Kubernetes (Helm)
+
+A Helm chart is published with every release as `oci://ghcr.io/callog-dev/charts/callog`
+(`--version X.Y.Z`); install, secrets, the first start and network examples are in the
+[chart's README](../charts/callog/README.md). It runs the api and exactly one worker as in
+[§1](#1-what-an-installation-consists-of), needs a Postgres as in
+[§3](#3-database-requirements), and with `migrations.enabled=false` leaves migrations to your
+DBA as in [§5](#5-migrations).
+
+To keep the UI internal, give webhooks their own public host. `GITHUB_WEBHOOK_URL` sets that
+address for an App the setup page creates; the chart's `webhookIngress` sets it for you. For an
+existing App, change its Webhook URL in the App's settings on GitHub.

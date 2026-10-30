@@ -1,11 +1,31 @@
 # Changelog
 
 All notable changes to Callog. The format follows [Keep a Changelog](https://keepachangelog.com/);
-versions follow [semver](https://semver.org/): a **minor** release is `docker compose pull && up -d`,
-a **major** release needs the steps in [docs/upgrade.md](docs/upgrade.md). Every release has an
+versions follow [semver](https://semver.org/): a **minor** release is a regular upgrade
+(`docker compose pull && up -d`, or `helm upgrade`), a **major** release needs the steps in
+[docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
 ## [Unreleased]
+
+### Added
+
+- A Helm chart, `oci://ghcr.io/callog-dev/charts/callog`, released with the app: an api
+  Deployment, exactly one worker that applies migrations, and an optional webhook-only ingress.
+  See [charts/callog/README.md](charts/callog/README.md).
+- `GITHUB_WEBHOOK_URL`: the setup page gives a new GitHub App this webhook address instead of
+  `PUBLIC_URL/webhooks/github`, so the UI can stay internal while only webhooks are public.
+- `GITHUB_APP_PRIVATE_KEY` (or the file at `GITHUB_APP_PRIVATE_KEY_PATH`) may also be the `.pem`
+  in base64; the setup page prints the key that way too. A key that is neither stops the server
+  with one line.
+
+### Changed
+
+- The setup page shows where GitHub will send webhooks, and the credentials page no longer
+  assumes docker compose.
+- README: where to get the files, and the address GitHub Actions runners need to reach.
+- The bundled Postgres no longer creates the test-only `notify_test` database. An existing one
+  can be dropped: `docker compose exec postgres dropdb -U notify notify_test`.
 
 ### Fixed
 
@@ -21,6 +41,7 @@ a **major** release needs the steps in [docs/upgrade.md](docs/upgrade.md). Every
   the new `<org>/<repo>` names: GitHub signs OIDC tokens with the new repository name, and the
   server does not rewrite your config repository. Until then, requests from those workflows are
   rejected with 403.
+- Nothing else: an existing `.env` works as it is.
 
 ## [0.2.0]
 
