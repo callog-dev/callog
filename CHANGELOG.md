@@ -6,7 +6,7 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
-## [Unreleased]
+## [0.3.0]
 
 ### Added
 
