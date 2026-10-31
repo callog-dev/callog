@@ -55,14 +55,7 @@ export class GithubAppSetupController implements OnApplicationBootstrap {
   ) {}
 
   onApplicationBootstrap(): void {
-    if (this.app) {
-      if (this.env.GITHUB_WEBHOOK_URL) {
-        this.logger.log(
-          "GITHUB_WEBHOOK_URL only applies when the setup page creates the App; to move webhooks of an existing App, change its Webhook URL in the App's settings on GitHub",
-        );
-      }
-      return;
-    }
+    if (this.app) return;
     const where = this.env.PUBLIC_URL
       ? `open ${this.publicUrl}${SETUP_PATH} to create one`
       : "set PUBLIC_URL, restart and open it in a browser to create one";
