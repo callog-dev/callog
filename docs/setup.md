@@ -194,9 +194,11 @@ variables at start.
 
 ## 9. Setting up without the browser
 
-Everything the Admin pages do on first start is also an HTTP API for scripts, protected by
-`ADMIN_TOKEN` (`openssl rand -hex 24`; `/admin/*` answers 404 while it is not set). The tenant
-ID is in Admin → Settings, or in the log when the App installation is picked up
+Admins do all of this in the browser: Integrations connects Slack and Telegram, Config loads
+the config repo, Settings creates API keys and runs maintenance. For scripts the same actions
+are an HTTP API protected by `ADMIN_TOKEN` (`openssl rand -hex 24`; `/admin/*` answers 404
+while it is not set). The tenant ID is in Settings → General, or in the log when the App
+installation is picked up
 (`docker compose logs app | grep "Tenant "`).
 
 ```bash
