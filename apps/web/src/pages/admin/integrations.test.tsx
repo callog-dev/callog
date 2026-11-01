@@ -14,7 +14,6 @@ const status = (overrides: object = {}) => ({
   config: { active: null, latest: null },
   slack: { team: "Acme", commands: true, lastSyncedAt: null },
   telegram: null,
-  last24h: {},
   ...overrides,
 });
 

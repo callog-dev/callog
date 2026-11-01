@@ -1,174 +1,139 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { CheckCircle2, CircleAlert, Send, Hash, Users } from "lucide-react";
-
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { ChevronRight, CircleAlert, CircleCheck, Info } from "lucide-react";
+import { Link } from "react-router";
+import { ErrorState } from "@/components/states";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ErrorState } from "@/components/states";
-import { adminApi } from "@/lib/api";
+import { adminApi, type AttentionItem } from "@/lib/api";
 import { ago } from "@/lib/time";
-import { SlackConnectDialog, TelegramConnectDialog } from "./connect-channels";
-import { LoadConfigButton } from "./getting-started";
-import { ConfigIssueList } from "@/components/config-issues";
 
+/** What needs attention, each item linking to where it is fixed, then a few counters. */
 export function OverviewTab() {
-  const status = useQuery({ queryKey: ["admin", "status"], queryFn: adminApi.status });
-  const teams = useQuery({ queryKey: ["admin", "teams"], queryFn: adminApi.teams });
-
-  const [dialog, setDialog] = useState<"slack" | "telegram">();
-
-  if (status.isPending) return <Skeleton className="h-48 w-full" />;
-  if (status.isError)
-    return <ErrorState error={status.error} retry={() => void status.refetch()} />;
-  const s = status.data;
-  const latest = s.config.latest;
-  const errors = latest?.status === "invalid" ? (latest.issues?.errors ?? []) : [];
-  const warnings = latest?.issues?.warnings ?? [];
-  const total = Object.values(s.last24h).reduce((a, b) => a + (b ?? 0), 0);
-  const coverage = teams.data?.reduce(
-    (acc, t) => ({ linked: acc.linked + t.linked, total: acc.total + t.total }),
-    { linked: 0, total: 0 },
-  );
+  // Fresh on every visit: an item should be gone right after it was fixed elsewhere.
+  const attention = useQuery({
+    queryKey: ["admin", "attention"],
+    queryFn: adminApi.attention,
+    staleTime: 0,
+  });
+  if (attention.isPending) return <Skeleton className="h-48 w-full" />;
+  if (attention.isError) {
+    return <ErrorState error={attention.error} retry={() => void attention.refetch()} />;
+  }
+  const { items, counters } = attention.data;
 
   return (
     <div className="space-y-4">
-      {dialog === "slack" && <SlackConnectDialog onClose={() => setDialog(undefined)} />}
-      {dialog === "telegram" && (
-        <TelegramConnectDialog bot={s.telegram?.bot ?? null} onClose={() => setDialog(undefined)} />
-      )}
-      {errors.length > 0 && (
-        <Alert variant="destructive">
-          <CircleAlert />
-          <AlertTitle>
-            The latest config push was rejected —{" "}
-            {s.config.active ? "the previous version stays active" : "no config is active"}
-          </AlertTitle>
-          <AlertDescription>
-            <ConfigIssueList issues={errors} />
-          </AlertDescription>
-        </Alert>
-      )}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader>
-            <CardDescription>Config</CardDescription>
-            <CardTitle className="flex items-center gap-2 text-base">
-              {s.config.active ? (
-                <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
-              ) : (
-                <CircleAlert className="size-4 text-destructive" />
-              )}
-              {s.config.active
-                ? `${s.config.active.routes} routes · ${s.config.active.commitSha.slice(0, 7)}`
-                : "No valid config"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
-            <span className="truncate">
-              {s.configRepo}
-              {latest ? ` · ${ago(latest.createdAt)}` : ""}
-            </span>
-            <LoadConfigButton />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Channels</CardDescription>
-            <CardTitle className="space-y-1 text-base font-normal">
-              <div className="flex items-center gap-2">
-                <Hash className="size-4" />
-                {s.slack ? (
-                  <>
-                    Slack <b>{s.slack.team}</b>
-                    {s.slack.commands ? <Badge variant="secondary">/notify</Badge> : null}
-                  </>
-                ) : (
-                  <span className="text-muted-foreground">Slack not connected</span>
-                )}
-                <ChangeButton connected={Boolean(s.slack)} onClick={() => setDialog("slack")} />
-              </div>
-              <div className="flex items-center gap-2">
-                <Send className="size-4" />
-                {s.telegram ? (
-                  <>
-                    Telegram <b>@{s.telegram.bot}</b>
-                  </>
-                ) : (
-                  <span className="text-muted-foreground">Telegram not connected</span>
-                )}
-                <ChangeButton
-                  connected={Boolean(s.telegram)}
-                  onClick={() => setDialog("telegram")}
-                />
-              </div>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            {s.slack?.lastSyncedAt
-              ? `People synced ${ago(s.slack.lastSyncedAt)}`
-              : "People not synced yet"}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Last 24 hours</CardDescription>
-            <CardTitle className="text-2xl">{total} notifications</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-1">
-            {Object.entries(s.last24h).map(([k, v]) => (
-              <Badge
-                key={k}
-                variant={k === "failed" || k === "partially_failed" ? "destructive" : "secondary"}
-              >
-                {k.replace("_", " ")} {v}
-              </Badge>
-            ))}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Teams</CardDescription>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="size-4" />
-              {coverage
-                ? coverage.total > 0
-                  ? `${coverage.linked}/${coverage.total} members linked`
-                  : `${teams.data?.length ?? 0} teams, no members`
-                : "…"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            {coverage && coverage.linked < coverage.total
-              ? "Unlinked members are mentioned as plain text — see Teams."
-              : "Everyone in members_from is linked."}
-          </CardContent>
-        </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Needs attention</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {items.length ? (
+            <ul className="divide-y rounded-md border">
+              {items.map((item) => {
+                const { text, to, severity } = describe(item);
+                return (
+                  <li key={item.kind}>
+                    <Link
+                      to={to}
+                      className="flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-muted/50"
+                    >
+                      {severity === "error" ? (
+                        <CircleAlert className="size-4 shrink-0 text-destructive" />
+                      ) : (
+                        <Info className="size-4 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="flex-1">{text}</span>
+                      <ChevronRight className="size-4 text-muted-foreground" />
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <CircleCheck className="size-4 text-emerald-600 dark:text-emerald-400" /> All good:
+              nothing needs attention.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Counter label="Routes" value={counters.routes} to="/routes" />
+        <Counter label="People" value={counters.people} to="/manage/people" />
+        <Counter
+          label="Notifications, 24 h"
+          value={counters.notifications24h}
+          to="/manage/deliveries?period=24h"
+        />
+        <Counter
+          label="Delivered, 24 h"
+          value={counters.delivered24h}
+          to="/manage/deliveries?period=24h&status=delivered"
+        />
       </div>
-      {warnings.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Config warnings</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm">
-            {warnings.map((w, i) => (
-              <div key={i}>
-                <code>{w.file}</code> — {w.message}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
 
-function ChangeButton({ connected, onClick }: { connected: boolean; onClick: () => void }) {
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+function describe(item: AttentionItem): { text: string; to: string; severity: "error" | "info" } {
+  switch (item.kind) {
+    case "config_rejected":
+      return {
+        text: `The latest config push was rejected (${plural(item.errors, "error")}); the previous version stays active.`,
+        to: `/manage/config/${item.versionId}`,
+        severity: "error",
+      };
+    case "no_config":
+      return { text: "No valid config is loaded yet.", to: "/manage/config", severity: "error" };
+    case "slack_missing":
+      return { text: "Slack is not connected.", to: "/manage/integrations", severity: "error" };
+    case "failed":
+      return {
+        text: `${plural(item.count, "notification")} failed in the last 24 hours.`,
+        to: "/manage/deliveries?status=failed&period=24h",
+        severity: "error",
+      };
+    case "partially_failed":
+      return {
+        text: `${plural(item.count, "notification")} partially failed in the last 24 hours.`,
+        to: "/manage/deliveries?status=partially_failed&period=24h",
+        severity: "error",
+      };
+    case "unmapped":
+      return {
+        text: `${plural(item.count, "recipient")} mentioned as plain text: nobody is linked to them.`,
+        to: "/manage/people/unmapped",
+        severity: "info",
+      };
+    case "suggested":
+      return {
+        text: `${plural(item.count, "suggested link")} to confirm.`,
+        to: "/manage/people/suggested",
+        severity: "info",
+      };
+    case "sync_stale":
+      return {
+        text: item.lastSyncedAt
+          ? `People were last synced from Slack ${ago(item.lastSyncedAt)}.`
+          : "People have not been synced from Slack yet.",
+        to: "/manage/integrations",
+        severity: "info",
+      };
+  }
+}
+
+function Counter({ label, value, to }: { label: string; value: number; to: string }) {
   return (
-    <Button size="sm" variant="ghost" className="ml-auto h-7 px-2" onClick={onClick}>
-      {connected ? "Change" : "Connect"}
-    </Button>
+    <Link to={to}>
+      <Card className="transition-colors hover:bg-muted/50">
+        <CardHeader>
+          <CardDescription>{label}</CardDescription>
+          <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
+        </CardHeader>
+      </Card>
+    </Link>
   );
 }
