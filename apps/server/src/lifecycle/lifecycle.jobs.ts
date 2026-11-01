@@ -49,10 +49,13 @@ export class LifecycleJobs implements OnModuleInit {
    */
   async syncAll(): Promise<void> {
     await this.installations.reconcileIfEnabled();
-    for (const tenant of await this.tenants.listActive()) {
-      await this.slackEvents.requestSync(tenant.id);
-      await this.identityEvents.requestGithubSync(tenant.id);
-    }
+    for (const tenant of await this.tenants.listActive()) await this.syncTenant(tenant.id);
+  }
+
+  /** Queues the people syncs of one workspace: Slack (if connected), then GitHub accounts. */
+  async syncTenant(tenantId: string): Promise<void> {
+    await this.slackEvents.requestSync(tenantId);
+    await this.identityEvents.requestGithubSync(tenantId);
   }
 
   /**

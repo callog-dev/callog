@@ -7,6 +7,7 @@ import { ConfigPage } from "./config";
 import { DeliveriesTab } from "./deliveries";
 import { GettingStarted } from "./getting-started";
 import { IntegrationsPage } from "./integrations";
+import { MaintenancePage } from "./maintenance";
 import { OverviewTab } from "./overview";
 import { PeoplePage } from "./people";
 import { SettingsTab } from "./settings";
@@ -34,6 +35,7 @@ export function AdminRoutes({ me }: { me: Me }) {
         <Route index element={<SettingsTab />} />
         <Route path="admins" element={<AdminsTab me={me} />} />
         <Route path="api-keys" element={<ApiKeysTab />} />
+        <Route path="maintenance" element={<MaintenancePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/manage" replace />} />
     </Routes>
@@ -44,4 +46,5 @@ const SETTINGS = [
   { title: "General", url: "/manage/settings" },
   { title: "Admins", url: "/manage/settings/admins" },
   { title: "API keys", url: "/manage/settings/api-keys" },
+  { title: "Maintenance", url: "/manage/settings/maintenance" },
 ];

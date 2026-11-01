@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { IdentityModule } from "../identity/identity.module";
+import { LifecycleModule } from "../lifecycle/lifecycle.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { ProducersModule } from "../producers/producers.module";
 import { RoutingModule } from "../routing/routing.module";
@@ -18,6 +19,7 @@ import { SessionsService } from "./sessions.service";
 @Module({
   imports: [
     IdentityModule,
+    LifecycleModule,
     NotificationsModule,
     TenantsModule,
     TenantConfigModule,

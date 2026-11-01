@@ -251,6 +251,17 @@ export interface ConfigVersionDetails extends Omit<ConfigVersionRow, "errors" | 
   previousCommitSha: string | null;
 }
 
+export interface RetentionReport {
+  notifications: number;
+  configVersions: number;
+  unmappedRecipients: number;
+}
+
+export interface MaintenanceStatus {
+  sync: { at: string } | null;
+  retention: { at: string; details: RetentionReport } | null;
+}
+
 export interface ConfigIssue {
   file: string;
   path: (string | number)[];
@@ -297,6 +308,9 @@ export const adminApi = {
     ),
   configVersion: (id: string) =>
     request<ConfigVersionDetails>("GET", `/api/admin/config/versions/${id}`),
+  maintenance: () => request<MaintenanceStatus>("GET", "/api/admin/maintenance"),
+  syncPeople: () => request<{ status: "queued" }>("POST", "/api/admin/maintenance/sync"),
+  runRetention: () => request<RetentionReport>("POST", "/api/admin/maintenance/retention"),
   reloadConfig: () =>
     request<{ status: string; reason?: string }>("POST", "/api/admin/config/reload"),
   notifications: (params: {
