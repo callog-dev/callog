@@ -7,6 +7,7 @@ import {
   deliveries,
   identities,
   notifications,
+  persons,
   tenants,
   unmappedRecipients,
 } from "../src/db/schema";
@@ -321,6 +322,68 @@ teams:
     });
   });
 
+  it("searches people by name or account, a page at a time", async () => {
+    await db.insert(persons).values(
+      Array.from({ length: 1200 }, (_, i) => ({
+        tenantId,
+        displayName: `Person ${String(i).padStart(4, "0")}`,
+      })),
+    );
+
+    const first = (await call("GET", "/api/admin/people")).json();
+    expect(first.total).toBe(1202);
+    expect(first.items).toHaveLength(first.pageSize);
+    const last = (await call("GET", "/api/admin/people?page=25")).json();
+    expect(last.items.map((p: { name: string }) => p.name)).toEqual(["Person 1198", "Person 1199"]);
+
+    const byName = (await call("GET", "/api/admin/people?q=person%20011")).json();
+    expect(byName.total).toBe(10);
+    const byLogin = (await call("GET", "/api/admin/people?q=BOB-GH")).json();
+    expect(byLogin.items.map((p: { name: string }) => p.name)).toEqual(["Bob"]);
+    const byEmail = (await call("GET", "/api/admin/people?q=bob%40acme")).json();
+    expect(byEmail.total).toBe(1);
+    // LIKE wildcards in the query are matched literally.
+    expect((await call("GET", "/api/admin/people?q=%25")).json().total).toBe(0);
+
+    expect((await call("GET", "/api/admin/people/options")).json()).toHaveLength(1202);
+    expect((await call("GET", "/api/admin/people?page=0")).statusCode).toBe(400);
+  });
+
+  it("shows a person with their role, preferences and notifications naming them", async () => {
+    await db.insert(notifications).values([
+      {
+        tenantId,
+        routeId: "r",
+        configVersionId: versionId,
+        source: { type: "api_key", apiKeyId: "k", apiKeyName: "ci" },
+        recipients: ["github:Bob-GH"],
+      },
+      {
+        tenantId,
+        routeId: "r",
+        configVersionId: versionId,
+        source: { type: "api_key", apiKeyId: "k", apiKeyName: "ci" },
+        recipients: ["github:someone-else"],
+      },
+    ]);
+
+    const card = (await call("GET", `/api/admin/people/${bob}`)).json();
+    expect(card).toMatchObject({
+      name: "Bob",
+      status: "active",
+      admin: false,
+      preferences: { dmChannel: "slack", mutedRoutes: [] },
+      recentNotifications: [{ route: "r", status: "accepted" }],
+    });
+    expect(card.identities.map((i: { provider: string }) => i.provider).sort()).toEqual([
+      "email",
+      "github",
+      "slack",
+    ]);
+    const missing = "00000000-0000-4000-8000-000000000000";
+    expect((await call("GET", `/api/admin/people/${missing}`)).statusCode).toBe(404);
+  });
+
   it("retries a failed notification once", async () => {
     const [n] = await db
       .insert(notifications)
@@ -387,11 +450,19 @@ teams:
       source: "commit_heuristic",
       confidence: "suggested",
     });
-    const ids = (await call("GET", "/api/admin/people"))
+    const ids = (await call("GET", "/api/admin/people?q=bob"))
       .json()
-      .find((p: { name: string }) => p.name === "Bob").identities;
+      .items.find((p: { name: string }) => p.name === "Bob").identities;
     const id = (handle: string) => ids.find((i: { handle: string }) => i.handle === handle).id;
 
+    expect(
+      (await call("GET", "/api/admin/identities/suggested"))
+        .json()
+        .map((l: { handle: string; person: { name: string } }) => [l.handle, l.person.name]),
+    ).toEqual([
+      ["maybe", "Bob"],
+      ["nope", "Bob"],
+    ]);
     await call("POST", `/api/admin/identities/${id("maybe")}/confirm`);
     expect((await call("DELETE", `/api/admin/identities/${id("nope")}`)).statusCode).toBe(204);
 

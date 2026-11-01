@@ -50,10 +50,10 @@ export interface DataTableProps<T> {
   /** From `useUrlTableView()`; without it the view lives in component state. */
   view?: ViewState;
   /**
-   * The caller filters, sorts and pages on the server from `view`: `data` is one page as is,
-   * and `footer` holds the paging controls.
+   * The caller filters, sorts and pages on the server from `view`: `data` is one page as is.
+   * Paging is by `pageCount` pages, or by the caller's own controls in `footer` (a cursor).
    */
-  manual?: { footer?: ReactNode };
+  manual?: { footer?: ReactNode; pageCount?: number };
   getRowId?: (row: T) => string;
   rowClassName?: (row: T) => string | undefined;
   /** Makes rows clickable (and reachable with the keyboard). */
@@ -101,6 +101,7 @@ export function DataTable<T>({
     manualFiltering: !!manual,
     manualSorting: !!manual,
     manualPagination: !!manual,
+    pageCount: manual?.pageCount,
     autoResetPageIndex: false,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: manual ? undefined : getFilteredRowModel(),
@@ -185,7 +186,8 @@ export function DataTable<T>({
           )}
         </TableBody>
       </Table>
-      {manual ? manual.footer : table.getPageCount() > 1 && <Pager table={table} />}
+      {manual?.footer}
+      {table.getPageCount() > 1 && <Pager table={table} />}
     </div>
   );
 }

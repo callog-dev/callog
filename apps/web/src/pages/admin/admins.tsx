@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
 import { actionsColumn, DataTable, type ColumnDef } from "@/components/data-table";
@@ -16,23 +17,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { adminApi, type AdminsInfo, type Me } from "@/lib/api";
+import { PersonSelect, usePeopleOptions } from "./link-dialog";
 import { ago } from "@/lib/time";
 
 /** Who can open /manage: GitHub org owners (always) and people granted the role here. */
 export function AdminsTab({ me }: { me: Me }) {
   const client = useQueryClient();
   const admins = useQuery({ queryKey: ["admin", "admins"], queryFn: adminApi.admins });
-  const people = useQuery({ queryKey: ["admin", "people"], queryFn: adminApi.people });
   const [granting, setGranting] = useState(false);
+  const people = usePeopleOptions(granting);
   const [personId, setPersonId] = useState("");
   const refresh = () => client.invalidateQueries({ queryKey: ["admin", "admins"] });
   const grant = useMutation({
@@ -71,9 +66,7 @@ export function AdminsTab({ me }: { me: Me }) {
     return <ErrorState error={admins.error} retry={() => void admins.refetch()} />;
   }
   const adminIds = new Set(admins.data.admins.map((a) => a.person.id));
-  const candidates = (people.data ?? []).filter(
-    (p) => p.status === "active" && !adminIds.has(p.id),
-  );
+  const candidates = (people.data ?? []).filter((p) => !adminIds.has(p.id));
 
   return (
     <div className="space-y-4">
@@ -163,18 +156,7 @@ export function AdminsTab({ me }: { me: Me }) {
               Admins see every delivery (including payloads), link accounts and manage keys.
             </DialogDescription>
           </DialogHeader>
-          <Select value={personId} onValueChange={setPersonId}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Choose a person" />
-            </SelectTrigger>
-            <SelectContent>
-              {candidates.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <PersonSelect people={candidates} value={personId} onChange={setPersonId} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setGranting(false)}>
               Cancel
@@ -203,7 +185,9 @@ function adminColumns(
       meta: { className: "font-medium" },
       cell: ({ row: { original: a } }) => (
         <>
-          {a.person.name}
+          <Link to={`/manage/people/${a.person.id}`} className="underline-offset-4 hover:underline">
+            {a.person.name}
+          </Link>
           {a.person.id === myId && (
             <Badge variant="outline" className="ml-2">
               you

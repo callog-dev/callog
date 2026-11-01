@@ -1,4 +1,5 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router";
 import { Link2, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -10,13 +11,11 @@ import { PersonName } from "@/components/person-name";
 import { ProviderBadge } from "@/components/provider-badge";
 import { EmptyState, ErrorState } from "@/components/states";
 import { adminApi, type TeamInfo } from "@/lib/api";
-import { LinkDialog } from "./people";
+import { LinkDialog } from "./link-dialog";
 
 /** Teams from teams.yaml and who `members_from` resolves to: read-only, link by hand. */
 export function TeamsTab() {
-  const client = useQueryClient();
   const teams = useQuery({ queryKey: ["admin", "teams"], queryFn: adminApi.teams });
-  const people = useQuery({ queryKey: ["admin", "people"], queryFn: adminApi.people });
   const [linking, setLinking] = useState<string | null>(null);
 
   if (teams.isPending) return <Skeleton className="h-64 w-full" />;
@@ -34,17 +33,7 @@ export function TeamsTab() {
       {teams.data.map((t) => (
         <TeamCard key={t.slug} team={t} onLink={setLinking} />
       ))}
-      {linking !== null && people.data && (
-        <LinkDialog
-          initialRef={linking}
-          people={people.data}
-          onClose={() => setLinking(null)}
-          onDone={() => {
-            void client.invalidateQueries({ queryKey: ["admin", "teams"] });
-            void client.invalidateQueries({ queryKey: ["admin", "people"] });
-          }}
-        />
-      )}
+      {linking !== null && <LinkDialog initialRef={linking} onClose={() => setLinking(null)} />}
     </div>
   );
 }
@@ -107,7 +96,9 @@ function memberColumns(link: (ref: string) => void): ColumnDef<Member>[] {
       accessorFn: (m) => m.person?.name ?? "",
       cell: ({ row: { original: m } }) =>
         m.person ? (
-          <PersonName name={m.person.name} status={m.person.status} />
+          <Link to={`/manage/people/${m.person.id}`} className="underline-offset-4 hover:underline">
+            <PersonName name={m.person.name} status={m.person.status} />
+          </Link>
         ) : (
           <span className="text-muted-foreground">not linked</span>
         ),

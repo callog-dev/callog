@@ -16,7 +16,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ownValue, parseRef, type ConfigIssue, type Ref } from "@callog/config-schema";
-import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { parseBody } from "../admin/parse-body";
 import { DB, type Db } from "../db/db";
@@ -32,6 +32,7 @@ import {
 import { GithubAppService } from "../github/github-app.service";
 import { PeopleService } from "../identity/people.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { PreferencesService } from "../identity/preferences.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
 import { apiKeyNameSchema, ApiKeysService } from "../producers/api-keys.service";
 import {
@@ -50,7 +51,7 @@ import { TelegramSender } from "../telegram/telegram-sender";
 import { TelegramApiError } from "../telegram/telegram-api";
 import { TelegramChatsService } from "../telegram/telegram-chats.service";
 import { TelegramConnectionsService } from "../telegram/telegram-connections.service";
-import { RecipientResolver } from "../routing/recipient-resolver";
+import { RecipientResolver, refsNaming } from "../routing/recipient-resolver";
 import { ConfigLoader } from "../tenant-config/config-loader";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
 import { configRepoOf, TenantsService } from "../tenants/tenants.service";
@@ -80,9 +81,25 @@ const notificationsQuery = z.object({
   period: z.enum(["24h", "7d", "30d"]).optional(),
   before: z.iso.datetime({ offset: true }).optional(),
 });
+const peopleQuery = z.object({
+  q: z.string().trim().max(200).optional(),
+  status: z.enum(["active", "inactive", "all"]).default("active"),
+  page: z.coerce.number().int().min(1).default(1),
+});
 const versionsQuery = z.object({ before: z.iso.datetime({ offset: true }).optional() });
 const apiKeyBody = z.object({ name: apiKeyNameSchema });
 const adminBody = z.object({ personId: z.uuid() });
+
+function identityView(i: typeof identities.$inferSelect) {
+  return {
+    id: i.id,
+    provider: i.provider,
+    externalId: i.externalId,
+    handle: i.handle,
+    source: i.source,
+    confidence: i.confidence,
+  };
+}
 
 /** Admin section of the web UI. Replaces the ADMIN_TOKEN endpoints for people. */
 @Controller("api/admin")
@@ -105,6 +122,7 @@ export class AdminApiController {
     private readonly resolver: RecipientResolver,
     private readonly pipeline: NotificationsService,
     private readonly slackSender: SlackSender,
+    private readonly preferences: PreferencesService,
     private readonly telegramSender: TelegramSender,
   ) {}
 
@@ -281,30 +299,130 @@ export class AdminApiController {
 
   // ---- People ----
 
+  /**
+   * One page of people by name. `q` matches the name or any linked account (login, email,
+   * Slack or Telegram id).
+   */
   @Get("people")
-  async peopleList(@Req() req: SessionRequest) {
+  async peopleList(@Req() req: SessionRequest, @Query() query: unknown) {
     const { tenantId } = req.session!;
-    const ps = await this.db
+    const { q, status, page } = parseBody(peopleQuery, query);
+    const pattern = q && `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const where = and(
+      eq(persons.tenantId, tenantId),
+      status === "all" ? undefined : eq(persons.status, status),
+      pattern
+        ? or(
+            ilike(persons.displayName, pattern),
+            sql`exists (select 1 from ${identities} i where i.person_id = ${persons.id}
+              and (i.handle ilike ${pattern} or i.external_id ilike ${pattern}))`,
+          )
+        : undefined,
+    );
+    const [ps, [count]] = await Promise.all([
+      this.db
+        .select()
+        .from(persons)
+        .where(where)
+        .orderBy(persons.displayName, persons.id)
+        .limit(PAGE)
+        .offset((page - 1) * PAGE),
+      this.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(persons)
+        .where(where),
+    ]);
+    const ids = ps.length
+      ? await this.db
+          .select()
+          .from(identities)
+          .where(
+            inArray(
+              identities.personId,
+              ps.map((p) => p.id),
+            ),
+          )
+      : [];
+    return {
+      items: ps.map((p) => ({
+        id: p.id,
+        name: p.displayName,
+        status: p.status,
+        identities: ids.filter((i) => i.personId === p.id).map(identityView),
+      })),
+      total: count!.total,
+      pageSize: PAGE,
+    };
+  }
+
+  /** Links guessed from commit history, waiting for an admin to confirm or reject them. */
+  @Get("identities/suggested")
+  async suggestedLinks(@Req() req: SessionRequest) {
+    const rows = await this.db
+      .select({ identity: identities, person: { id: persons.id, name: persons.displayName } })
+      .from(identities)
+      .innerJoin(persons, eq(persons.id, identities.personId))
+      .where(
+        and(eq(identities.tenantId, req.session!.tenantId), eq(identities.confidence, "suggested")),
+      )
+      .orderBy(persons.displayName, identities.createdAt);
+    return rows.map((r) => ({ ...identityView(r.identity), person: r.person }));
+  }
+
+  /** Active people for pickers (link an account, grant the admin role). */
+  @Get("people/options")
+  peopleOptions(@Req() req: SessionRequest) {
+    return this.db
+      .select({ id: persons.id, name: persons.displayName })
+      .from(persons)
+      .where(and(eq(persons.tenantId, req.session!.tenantId), eq(persons.status, "active")))
+      .orderBy(persons.displayName);
+  }
+
+  /** A person with their accounts, role, preferences and the latest notifications naming them. */
+  @Get("people/:id")
+  async person(@Req() req: SessionRequest, @Param("id", ParseUUIDPipe) id: string) {
+    const { tenantId } = req.session!;
+    const [person] = await this.db
       .select()
       .from(persons)
-      .where(eq(persons.tenantId, tenantId))
-      .orderBy(persons.displayName);
-    const ids = await this.db.select().from(identities).where(eq(identities.tenantId, tenantId));
-    return ps.map((p) => ({
-      id: p.id,
-      name: p.displayName,
-      status: p.status,
-      identities: ids
-        .filter((i) => i.personId === p.id)
-        .map((i) => ({
-          id: i.id,
-          provider: i.provider,
-          externalId: i.externalId,
-          handle: i.handle,
-          source: i.source,
-          confidence: i.confidence,
-        })),
-    }));
+      .where(and(eq(persons.tenantId, tenantId), eq(persons.id, id)));
+    if (!person) throw new NotFoundException();
+    const accounts = await this.db.select().from(identities).where(eq(identities.personId, id));
+    const refs = refsNaming(id, accounts);
+    const [admin, preferences, recent] = await Promise.all([
+      this.admins.has(tenantId, id),
+      this.preferences.get(id),
+      this.db
+        .select({
+          id: notifications.id,
+          route: notifications.routeId,
+          status: notifications.status,
+          createdAt: notifications.createdAt,
+        })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.tenantId, tenantId),
+            sql`exists (select 1 from unnest(${notifications.recipients}) r
+              where lower(r) in (${sql.join(
+                refs.map((r) => sql`${r}`),
+                sql`, `,
+              )}))`,
+          ),
+        )
+        .orderBy(desc(notifications.createdAt))
+        .limit(10),
+    ]);
+    return {
+      id: person.id,
+      name: person.displayName,
+      status: person.status,
+      admin,
+      identities: accounts.map(identityView),
+      preferences,
+      recentNotifications: recent,
+    };
   }
 
   @Get("unmapped")
