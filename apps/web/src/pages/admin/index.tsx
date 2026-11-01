@@ -5,6 +5,7 @@ import { AdminsTab } from "./admins";
 import { ApiKeysTab } from "./api-keys";
 import { DeliveriesTab } from "./deliveries";
 import { GettingStarted } from "./getting-started";
+import { IntegrationsPage } from "./integrations";
 import { OverviewTab } from "./overview";
 import { PeopleTab } from "./people";
 import { SettingsTab } from "./settings";
@@ -26,6 +27,7 @@ export function AdminRoutes({ me }: { me: Me }) {
       <Route path="deliveries/:id?" element={<DeliveriesTab />} />
       <Route path="people" element={<PeopleTab />} />
       <Route path="teams" element={<TeamsTab />} />
+      <Route path="integrations" element={<IntegrationsPage />} />
       <Route path="settings" element={<SettingsLayout />}>
         <Route index element={<SettingsTab />} />
         <Route path="admins" element={<AdminsTab me={me} />} />

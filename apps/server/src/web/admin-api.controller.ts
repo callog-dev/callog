@@ -33,11 +33,19 @@ import { PeopleService } from "../identity/people.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
 import { apiKeyNameSchema, ApiKeysService } from "../producers/api-keys.service";
-import { slackConnectBody } from "../slack/admin-slack.controller";
+import {
+  asBadRequest as asSlackBadRequest,
+  slackConnectBody,
+} from "../slack/admin-slack.controller";
+import { SlackSender } from "../slack/slack-sender";
 import { SlackTokenRejectedError } from "../slack/slack-api";
 import { SlackConnectionsService } from "../slack/slack-connections.service";
 import { SlackEvents } from "../slack/slack-events";
-import { telegramConnectBody } from "../telegram/admin-telegram.controller";
+import {
+  asBadRequest as asTelegramBadRequest,
+  telegramConnectBody,
+} from "../telegram/admin-telegram.controller";
+import { TelegramSender } from "../telegram/telegram-sender";
 import { TelegramApiError } from "../telegram/telegram-api";
 import { TelegramChatsService } from "../telegram/telegram-chats.service";
 import { TelegramConnectionsService } from "../telegram/telegram-connections.service";
@@ -50,6 +58,9 @@ import { AdminSessionGuard } from "./admin-session.guard";
 import type { SessionRequest } from "./session.guard";
 
 const PAGE = 50;
+const TEST_TEXT = "Callog is connected: this is a test message from the admin UI.";
+const slackTestBody = z.object({ channel: z.string().trim().min(1) });
+const telegramTestBody = z.object({ chatId: z.string().trim().min(1) });
 const DAY_MS = 86_400_000;
 const PERIOD_DAYS = { "24h": 1, "7d": 7, "30d": 30 } as const;
 
@@ -91,6 +102,8 @@ export class AdminApiController {
     private readonly adminCheck: AdminCheck,
     private readonly resolver: RecipientResolver,
     private readonly pipeline: NotificationsService,
+    private readonly slackSender: SlackSender,
+    private readonly telegramSender: TelegramSender,
   ) {}
 
   // ---- Teams ----
@@ -454,6 +467,53 @@ export class AdminApiController {
       if (err instanceof TelegramApiError)
         throw new BadRequestException(`Telegram rejected the token: ${err.description}`);
       throw err;
+    }
+  }
+
+  @Delete("slack")
+  @HttpCode(204)
+  async disconnectSlack(@Req() req: SessionRequest) {
+    if (!(await this.slack.disconnect(req.session!.tenantId))) throw new NotFoundException();
+  }
+
+  /** People sync runs in the background; `lastSyncedAt` in `/status` moves when it is done. */
+  @Post("slack/sync")
+  @HttpCode(202)
+  async syncSlack(@Req() req: SessionRequest) {
+    const { tenantId } = req.session!;
+    if (!(await this.slack.find(tenantId))) throw new NotFoundException("Slack is not connected");
+    await this.slackEvents.requestSync(tenantId);
+    return { status: "queued" };
+  }
+
+  @Post("slack/test-message")
+  async slackTestMessage(@Req() req: SessionRequest, @Body() body: unknown) {
+    const { channel } = parseBody(slackTestBody, body);
+    try {
+      await this.slackSender.postToChannel(req.session!.tenantId, channel, { text: TEST_TEXT });
+      return { ok: true };
+    } catch (err) {
+      throw asSlackBadRequest(err);
+    }
+  }
+
+  @Delete("telegram")
+  @HttpCode(204)
+  async disconnectTelegram(@Req() req: SessionRequest) {
+    if (!(await this.telegram.disconnect(req.session!.tenantId))) throw new NotFoundException();
+  }
+
+  @Post("telegram/test-message")
+  async telegramTestMessage(@Req() req: SessionRequest, @Body() body: unknown) {
+    const { chatId } = parseBody(telegramTestBody, body);
+    try {
+      await this.telegramSender.send(req.session!.tenantId, chatId, {
+        text: TEST_TEXT,
+        buttons: [],
+      });
+      return { ok: true };
+    } catch (err) {
+      throw asTelegramBadRequest(err);
     }
   }
 

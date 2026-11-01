@@ -44,7 +44,7 @@ export class SlackSocketRunner implements OnApplicationBootstrap, OnApplicationS
 
   onApplicationBootstrap(): void {
     if (this.env.ROLE === "api") return;
-    this.connections.onConnected((connection) => void this.sockets.restart(connection));
+    this.connections.onChanged(() => void this.sockets.reconcile());
     this.sockets.watch();
   }
 
