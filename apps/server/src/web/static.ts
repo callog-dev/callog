@@ -56,6 +56,23 @@ export class SpaController {
   }
 }
 
+export function staticFileOptions(root: string) {
+  const assets = path.join(root, "assets") + path.sep;
+  return {
+    // `/` too goes through SpaController, which sends a fresh install to the setup page.
+    index: false as const,
+    // Vite puts a content hash into every asset name, so an asset never changes; other files
+    // (favicon) keep their names across releases.
+    cacheControl: false,
+    setHeaders: (reply: FastifyReply, filePath: string) => {
+      reply.header(
+        "cache-control",
+        filePath.startsWith(assets) ? "public, max-age=31536000, immutable" : "no-cache",
+      );
+    },
+  };
+}
+
 /** Serves the web UI when it is built; without a build the server runs API-only. */
 export function webUiModule() {
   if (!HAS_WEB_BUILD) return [];
@@ -64,8 +81,7 @@ export function webUiModule() {
       rootPath: WEB_DIST_DIR,
       // Fallback rendering is done by SpaController; keep the built-in one out of the way.
       renderPath: "/__notify_static_index",
-      // `/` too goes through SpaController, which sends a fresh install to the setup page.
-      serveStaticOptions: { index: false },
+      serveStaticOptions: staticFileOptions(WEB_DIST_DIR),
     }),
   ];
 }
