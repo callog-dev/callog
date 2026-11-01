@@ -63,6 +63,14 @@ import { AdminSessionGuard } from "./admin-session.guard";
 import type { SessionRequest } from "./session.guard";
 
 const PAGE = 50;
+/** The hourly sync is late when it has not finished for this long. */
+const STALE_SYNC_MS = 24 * 60 * 60 * 1000;
+
+type AttentionItem =
+  | { kind: "config_rejected"; versionId: string; errors: number }
+  | { kind: "no_config" | "slack_missing" }
+  | { kind: "failed" | "partially_failed" | "unmapped" | "suggested"; count: number }
+  | { kind: "sync_stale"; lastSyncedAt: string | null };
 const MAINTENANCE = { sync: "maintenance.sync", retention: "maintenance.retention" } as const;
 const TEST_TEXT = "Callog is connected: this is a test message from the admin UI.";
 const slackTestBody = z.object({ channel: z.string().trim().min(1) });
@@ -93,6 +101,12 @@ const peopleQuery = z.object({
 const versionsQuery = z.object({ before: z.iso.datetime({ offset: true }).optional() });
 const apiKeyBody = z.object({ name: apiKeyNameSchema });
 const adminBody = z.object({ personId: z.uuid() });
+
+/** The problems stored with a config version (`errors` holds both lists). */
+function issuesOf(version: { errors: unknown }) {
+  const issues = (version.errors ?? {}) as { errors?: ConfigIssue[]; warnings?: ConfigIssue[] };
+  return { errors: issues.errors ?? [], warnings: issues.warnings ?? [] };
+}
 
 function identityView(i: typeof identities.$inferSelect) {
   return {
@@ -682,17 +696,80 @@ export class AdminApiController {
         done: Boolean(active),
         repo: `${configRepo.owner}/${configRepo.repo}`,
         rejected: latest?.status === "invalid",
-        /** The first problems of a rejected push; the rest are in the Overview tab. */
-        errors:
-          latest?.status === "invalid"
-            ? ((latest.errors as { errors?: ConfigIssue[] } | null)?.errors ?? []).slice(0, 3)
-            : [],
+        /** The first problems of a rejected push; all of them are on its Config page. */
+        errors: latest?.status === "invalid" ? issuesOf(latest).errors.slice(0, 3) : [],
       },
       firstNotification: { done: delivered !== undefined },
     };
     return {
       steps,
       complete: Object.values(steps).every((s) => s.done || ("optional" in s && s.optional)),
+    };
+  }
+
+  /**
+   * What needs an admin's attention, most urgent first, plus a few counters. Each item is
+   * read from the current state, so it disappears once the problem is gone.
+   */
+  @Get("attention")
+  async attention(@Req() req: SessionRequest) {
+    const { tenantId } = req.session!;
+    const [active, latest, slack, counts, [unmapped], [suggested], [people]] = await Promise.all([
+      this.configs.getActive(tenantId),
+      this.configs.latest(tenantId),
+      this.slack.find(tenantId),
+      this.db
+        .select({ status: notifications.status, count: sql<number>`count(*)::int` })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.tenantId, tenantId),
+            sql`${notifications.createdAt} > now() - interval '24 hours'`,
+          ),
+        )
+        .groupBy(notifications.status),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(unmappedRecipients)
+        .where(eq(unmappedRecipients.tenantId, tenantId)),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(identities)
+        .where(and(eq(identities.tenantId, tenantId), eq(identities.confidence, "suggested"))),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(persons)
+        .where(and(eq(persons.tenantId, tenantId), eq(persons.status, "active"))),
+    ]);
+    const last24h = Object.fromEntries(counts.map((c) => [c.status, c.count]));
+    const items: AttentionItem[] = [];
+    if (latest?.status === "invalid") {
+      items.push({
+        kind: "config_rejected",
+        versionId: latest.id,
+        errors: issuesOf(latest).errors.length,
+      });
+    } else if (!active) {
+      items.push({ kind: "no_config" });
+    }
+    if (!slack) items.push({ kind: "slack_missing" });
+    for (const status of ["failed", "partially_failed"] as const) {
+      if (last24h[status]) items.push({ kind: status, count: last24h[status] });
+    }
+    if (unmapped!.count) items.push({ kind: "unmapped", count: unmapped!.count });
+    if (suggested!.count) items.push({ kind: "suggested", count: suggested!.count });
+    const lastSync = slack?.lastSyncedAt;
+    if (slack && (!lastSync || Date.now() - lastSync.getTime() > STALE_SYNC_MS)) {
+      items.push({ kind: "sync_stale", lastSyncedAt: lastSync?.toISOString() ?? null });
+    }
+    return {
+      items,
+      counters: {
+        routes: active ? Object.keys(active.config.routes).length : 0,
+        people: people!.count,
+        notifications24h: counts.reduce((sum, c) => sum + c.count, 0),
+        delivered24h: last24h.delivered ?? 0,
+      },
     };
   }
 
@@ -707,16 +784,6 @@ export class AdminApiController {
       this.slack.find(tenantId),
       this.telegram.find(tenantId),
     ]);
-    const counts = await this.db
-      .select({ status: notifications.status, count: sql<number>`count(*)::int` })
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.tenantId, tenantId),
-          sql`${notifications.createdAt} > now() - interval '24 hours'`,
-        ),
-      )
-      .groupBy(notifications.status);
     return {
       tenantId,
       org: tenant.githubOrgLogin,
@@ -731,7 +798,6 @@ export class AdminApiController {
               commitSha: latest.commitSha,
               status: latest.status,
               createdAt: latest.createdAt,
-              issues: latest.errors,
             }
           : null,
       },
@@ -743,7 +809,6 @@ export class AdminApiController {
           }
         : null,
       telegram: telegram ? { bot: telegram.botUsername } : null,
-      last24h: Object.fromEntries(counts.map((c) => [c.status, c.count])),
     };
   }
 
@@ -805,11 +870,9 @@ export class AdminApiController {
       this.configs.getActive(tenantId),
     ]);
     if (!version) throw new NotFoundException();
-    const issues = (version.errors ?? {}) as { errors?: ConfigIssue[]; warnings?: ConfigIssue[] };
     return {
       ...version,
-      errors: issues.errors ?? [],
-      warnings: issues.warnings ?? [],
+      ...issuesOf(version),
       active: version.id === active?.versionId,
     };
   }

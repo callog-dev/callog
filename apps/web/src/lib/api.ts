@@ -226,12 +226,10 @@ export interface AdminStatus {
       commitSha: string;
       status: "valid" | "invalid";
       createdAt: string;
-      issues: { errors?: ConfigIssue[]; warnings?: ConfigIssue[] } | null;
     } | null;
   };
   slack: { team: string; commands: boolean; lastSyncedAt: string | null } | null;
   telegram: { bot: string } | null;
-  last24h: Partial<Record<NotificationStatus, number>>;
 }
 
 export interface ConfigVersionRow {
@@ -249,6 +247,17 @@ export interface ConfigVersionDetails extends Omit<ConfigVersionRow, "errors" | 
   warnings: ConfigIssue[];
   routes: string[];
   previousCommitSha: string | null;
+}
+
+export type AttentionItem =
+  | { kind: "config_rejected"; versionId: string; errors: number }
+  | { kind: "no_config" | "slack_missing" }
+  | { kind: "failed" | "partially_failed" | "unmapped" | "suggested"; count: number }
+  | { kind: "sync_stale"; lastSyncedAt: string | null };
+
+export interface Attention {
+  items: AttentionItem[];
+  counters: { routes: number; people: number; notifications24h: number; delivered24h: number };
 }
 
 export interface RetentionReport {
@@ -308,6 +317,7 @@ export const adminApi = {
     ),
   configVersion: (id: string) =>
     request<ConfigVersionDetails>("GET", `/api/admin/config/versions/${id}`),
+  attention: () => request<Attention>("GET", "/api/admin/attention"),
   maintenance: () => request<MaintenanceStatus>("GET", "/api/admin/maintenance"),
   syncPeople: () => request<{ status: "queued" }>("POST", "/api/admin/maintenance/sync"),
   runRetention: () => request<RetentionReport>("POST", "/api/admin/maintenance/retention"),

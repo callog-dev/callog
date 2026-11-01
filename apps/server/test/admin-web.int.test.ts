@@ -234,7 +234,6 @@ teams:
       config: { active: { commitSha: "abc", routes: 1 }, latest: { status: "valid" } },
       slack: null,
       telegram: null,
-      last24h: { delivered: 1, failed: 1 },
     });
   });
 
@@ -419,6 +418,44 @@ teams:
     expect(last.retention).toMatchObject({ details: { notifications: 1 } });
     // The role log on the Admins page lists role changes only.
     expect((await call("GET", "/api/admin/admins")).json().audit).toEqual([]);
+  });
+
+  it("lists what needs attention and drops what is fixed", async () => {
+    await db.insert(notifications).values({
+      tenantId,
+      routeId: "r",
+      configVersionId: versionId,
+      source: { type: "api_key", apiKeyId: "k", apiKeyName: "ci" },
+      status: "failed",
+    });
+    await db
+      .insert(unmappedRecipients)
+      .values({ tenantId, ref: "github:ghost", provider: "slack" });
+
+    const before = (await call("GET", "/api/admin/attention")).json();
+    expect(before.items).toEqual([
+      { kind: "slack_missing" },
+      { kind: "failed", count: 1 },
+      { kind: "unmapped", count: 1 },
+    ]);
+    expect(before.counters).toEqual({
+      routes: 1,
+      people: 2,
+      notifications24h: 1,
+      delivered24h: 0,
+    });
+
+    await db.delete(unmappedRecipients);
+    const [rejected] = await db
+      .insert(configVersions)
+      .values({ tenantId, commitSha: "bad", status: "invalid", errors: { errors: [{}] } })
+      .returning();
+    const after = (await call("GET", "/api/admin/attention")).json();
+    expect(after.items).toEqual([
+      { kind: "config_rejected", versionId: rejected!.id, errors: 1 },
+      { kind: "slack_missing" },
+      { kind: "failed", count: 1 },
+    ]);
   });
 
   it("retries a failed notification once", async () => {
