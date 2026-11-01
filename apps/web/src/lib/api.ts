@@ -237,7 +237,13 @@ export const adminApi = {
   status: () => request<AdminStatus>("GET", "/api/admin/status"),
   reloadConfig: () =>
     request<{ status: string; reason?: string }>("POST", "/api/admin/config/reload"),
-  notifications: (params: { status?: string; before?: string }) => {
+  notifications: (params: {
+    status?: string;
+    route?: string;
+    source?: string;
+    period?: string;
+    before?: string;
+  }) => {
     const q = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v) as [string, string][],
     );
@@ -253,6 +259,8 @@ export const adminApi = {
     ),
   notification: (id: string) =>
     request<NotificationDetails>("GET", `/api/admin/notifications/${id}`),
+  retryNotification: (id: string) =>
+    request<{ status: "accepted" }>("POST", `/api/admin/notifications/${id}/retry`),
   people: () => request<AdminPerson[]>("GET", "/api/admin/people"),
   unmapped: () => request<UnmappedRow[]>("GET", "/api/admin/unmapped"),
   confirmIdentity: (id: string) => request<void>("POST", `/api/admin/identities/${id}/confirm`),

@@ -10,7 +10,8 @@ import { ownValue } from "@callog/config-schema";
 import { and, eq, gt, lte } from "drizzle-orm";
 import { sha256Hex } from "../crypto/digest";
 import { DB, type Db } from "../db/db";
-import { deliveries, idempotencyKeys, notifications } from "../db/schema";
+import type { AdminActor } from "../identity/tenant-admins.service";
+import { auditLog, deliveries, idempotencyKeys, notifications } from "../db/schema";
 import { ProducerAuthService, type Producer } from "../producers/producer-auth.service";
 import { QueueService } from "../queue/queue.service";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
@@ -116,16 +117,7 @@ export class NotificationsService {
           if (held.length === 0) throw new IdempotencyRace();
         }
 
-        await this.queue.enqueue(
-          DELIVER_TASK,
-          { notificationId: id },
-          {
-            // Strict order within a thread.
-            queueName: threadQueueName(producer.tenantId, request.thread_key),
-            maxAttempts: DELIVER_MAX_ATTEMPTS,
-          },
-          tx,
-        );
+        await this.enqueueDelivery(tx, producer.tenantId, id, request.thread_key);
         return id;
       });
       this.metrics.notificationsReceived.inc({ route: route.id });
@@ -165,6 +157,58 @@ export class NotificationsService {
         sent_at: d.sentAt,
       })),
     };
+  }
+
+  /**
+   * Sends a finished notification's failed deliveries again, through its thread's queue so the
+   * thread keeps its order. The attempt count of each delivery carries on. Relies on
+   * `DeliveryService.deliver` sending exactly the pending deliveries of an unfinished
+   * notification.
+   */
+  async retry(tenantId: string, notificationId: string, actor: AdminActor): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [notification] = await tx
+        .select({ status: notifications.status, threadKey: notifications.threadKey })
+        .from(notifications)
+        .where(and(eq(notifications.tenantId, tenantId), eq(notifications.id, notificationId)))
+        .for("update");
+      if (!notification) throw new NotFoundException();
+      if (notification.status !== "failed" && notification.status !== "partially_failed") {
+        throw new ConflictException(`Nothing to retry: the notification is ${notification.status}`);
+      }
+      const retried = await tx
+        .update(deliveries)
+        .set({ status: "pending" })
+        .where(and(eq(deliveries.notificationId, notificationId), eq(deliveries.status, "failed")))
+        .returning({ id: deliveries.id });
+      await tx
+        .update(notifications)
+        .set({ status: "accepted" })
+        .where(eq(notifications.id, notificationId));
+      await this.enqueueDelivery(tx, tenantId, notificationId, notification.threadKey);
+      await tx.insert(auditLog).values({
+        tenantId,
+        action: "notification.retried",
+        actorPersonId: actor.personId,
+        actorGithubLogin: actor.personId ? null : actor.githubLogin,
+        details: { notificationId, deliveries: retried.length },
+      });
+    });
+  }
+
+  /** Queued per thread: messages of one thread go out strictly in order. */
+  private enqueueDelivery(
+    tx: Parameters<QueueService["enqueue"]>[3],
+    tenantId: string,
+    notificationId: string,
+    threadKey: string | null | undefined,
+  ) {
+    return this.queue.enqueue(
+      DELIVER_TASK,
+      { notificationId },
+      { queueName: threadQueueName(tenantId, threadKey), maxAttempts: DELIVER_MAX_ATTEMPTS },
+      tx,
+    );
   }
 
   /** The notification created by an earlier identical request, or 409 if the body differs. */

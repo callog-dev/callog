@@ -1,10 +1,11 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DB, type Db } from "../src/db/db";
-import { deliveries, notifications, tenants, unmappedRecipients } from "../src/db/schema";
+import { auditLog, deliveries, notifications, tenants, unmappedRecipients } from "../src/db/schema";
 import { DeliveryService, RetryLater } from "../src/delivery/delivery.service";
 import { PeopleService } from "../src/identity/people.service";
+import { DELIVER_TASK, NotificationsService } from "../src/notifications/notifications.service";
 import { RecipientResolver } from "../src/routing/recipient-resolver";
 import { SlackApiError } from "../src/slack/slack-api";
 import { SlackConnectionsService } from "../src/slack/slack-connections.service";
@@ -135,6 +136,36 @@ describe("delivery (integration)", () => {
     expect(await service.deliver(id, { attempt: 1, maxAttempts: 8 })).toBe("partially_failed");
     const failed = (await rowsOf(id)).find((r) => r.status === "failed");
     expect(failed?.lastError).toBe("slack: channel_not_found");
+  });
+
+  it("retries the failed deliveries of a finished notification on request", async () => {
+    const id = await createNotification();
+    slack.failures = [new SlackApiError("channel_not_found")];
+    expect(await service.deliver(id, { attempt: 1, maxAttempts: 8 })).toBe("partially_failed");
+    await db.execute(sql`delete from graphile_worker._private_jobs`);
+
+    const actor = { personId: null, githubLogin: "octocat" };
+    await app.get(NotificationsService).retry(tenantId, id, actor);
+
+    expect(await statusOf(id)).toBe("accepted");
+    expect((await rowsOf(id)).map((r) => r.status).sort()).toEqual(["pending", "sent"]);
+    const jobs = await db.execute<{ task_identifier: string }>(
+      sql`select task_identifier from graphile_worker.jobs`,
+    );
+    expect(jobs.rows.map((j) => j.task_identifier)).toEqual([DELIVER_TASK]);
+    const [audit] = await db.select().from(auditLog).where(eq(auditLog.tenantId, tenantId));
+    expect(audit).toMatchObject({
+      action: "notification.retried",
+      actorGithubLogin: "octocat",
+      details: { notificationId: id, deliveries: 1 },
+    });
+
+    expect(await service.deliver(id, { attempt: 1, maxAttempts: 8 })).toBe("delivered");
+    expect(slack.posted).toHaveLength(2);
+    expect((await rowsOf(id)).map((r) => r.attempts).sort()).toEqual([1, 2]);
+    await expect(app.get(NotificationsService).retry(tenantId, id, actor)).rejects.toThrow(
+      "Nothing to retry",
+    );
   });
 
   it("gives up after the last attempt", async () => {

@@ -269,9 +269,20 @@ teams:
       [],
     );
 
-    for (const query of ["status=bogus", "before=yesterday"]) {
+    for (const query of ["status=bogus", "before=yesterday", "period=1y"]) {
       expect((await call("GET", `/api/admin/notifications?${query}`)).statusCode).toBe(400);
     }
+
+    expect(
+      (await call("GET", "/api/admin/notifications?source=acme%2Fe2e")).json().items,
+    ).toHaveLength(1);
+    expect((await call("GET", "/api/admin/notifications?source=other")).json().items).toEqual([]);
+    await db
+      .update(notifications)
+      .set({ createdAt: new Date(Date.now() - 2 * 86_400_000) })
+      .where(eq(notifications.id, n!.id));
+    expect((await call("GET", "/api/admin/notifications?period=24h")).json().items).toEqual([]);
+    expect((await call("GET", "/api/admin/notifications?period=7d")).json().items).toHaveLength(1);
 
     const details = (await call("GET", `/api/admin/notifications/${n!.id}`)).json();
     expect(details).toMatchObject({
@@ -279,6 +290,25 @@ teams:
       recipients: ["github:octocat"],
       deliveries: [{ lastError: "slack: channel_not_found", attempts: 1 }],
     });
+  });
+
+  it("retries a failed notification once", async () => {
+    const [n] = await db
+      .insert(notifications)
+      .values({
+        tenantId,
+        routeId: "r",
+        configVersionId: versionId,
+        source: { type: "api_key", apiKeyId: "k", apiKeyName: "ci" },
+        status: "failed",
+      })
+      .returning();
+
+    const res = await call("POST", `/api/admin/notifications/${n!.id}/retry`);
+    expect(res.statusCode).toBe(202);
+    expect((await call("POST", `/api/admin/notifications/${n!.id}/retry`)).statusCode).toBe(409);
+    const missing = "00000000-0000-4000-8000-000000000000";
+    expect((await call("POST", `/api/admin/notifications/${missing}/retry`)).statusCode).toBe(404);
   });
 
   it("links an unmapped recipient to a person and clears it from the report", async () => {

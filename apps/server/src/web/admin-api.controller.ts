@@ -16,7 +16,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ownValue, parseRef, type ConfigIssue, type Ref } from "@callog/config-schema";
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { parseBody } from "../admin/parse-body";
 import { DB, type Db } from "../db/db";
@@ -50,6 +50,8 @@ import { AdminSessionGuard } from "./admin-session.guard";
 import type { SessionRequest } from "./session.guard";
 
 const PAGE = 50;
+const DAY_MS = 86_400_000;
+const PERIOD_DAYS = { "24h": 1, "7d": 7, "30d": 30 } as const;
 
 const linkBody = z.object({
   personId: z.uuid(),
@@ -61,6 +63,9 @@ const linkBody = z.object({
 const notificationsQuery = z.object({
   status: z.enum(notifications.status.enumValues).optional(),
   route: z.string().optional(),
+  /** A repository (GitHub Actions) or an API key name. */
+  source: z.string().optional(),
+  period: z.enum(["24h", "7d", "30d"]).optional(),
   before: z.iso.datetime({ offset: true }).optional(),
 });
 const apiKeyBody = z.object({ name: apiKeyNameSchema });
@@ -162,11 +167,14 @@ export class AdminApiController {
 
   // ---- Deliveries ----
 
-  /** Latest notifications with their deliveries; `before` (ISO date) pages backwards. */
+  /**
+   * Latest notifications with their deliveries, newest first; `before` (the previous page's
+   * `nextBefore`) pages backwards.
+   */
   @Get("notifications")
   async notifications(@Req() req: SessionRequest, @Query() query: unknown) {
     const { tenantId } = req.session!;
-    const { status, route, before } = parseBody(notificationsQuery, query);
+    const { status, route, source, period, before } = parseBody(notificationsQuery, query);
     const rows = await this.db
       .select({
         id: notifications.id,
@@ -182,6 +190,15 @@ export class AdminApiController {
           eq(notifications.tenantId, tenantId),
           status ? eq(notifications.status, status) : undefined,
           route ? eq(notifications.routeId, route) : undefined,
+          source
+            ? or(
+                sql`${notifications.source}->>'repository' = ${source}`,
+                sql`${notifications.source}->>'apiKeyName' = ${source}`,
+              )
+            : undefined,
+          period
+            ? gte(notifications.createdAt, new Date(Date.now() - PERIOD_DAYS[period] * DAY_MS))
+            : undefined,
           before ? lt(notifications.createdAt, new Date(before)) : undefined,
         ),
       )
@@ -237,6 +254,14 @@ export class AdminApiController {
         sentAt: d.sentAt,
       })),
     };
+  }
+
+  /** Sends the failed deliveries of a failed or partially failed notification again. */
+  @Post("notifications/:id/retry")
+  @HttpCode(202)
+  async retry(@Req() req: SessionRequest, @Param("id", ParseUUIDPipe) id: string) {
+    await this.pipeline.retry(req.session!.tenantId, id, req.session!);
+    return { status: "accepted" };
   }
 
   // ---- People ----

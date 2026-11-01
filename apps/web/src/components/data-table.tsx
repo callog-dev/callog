@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useUrlState } from "@/hooks/use-url-state";
+import { cn } from "@/lib/utils";
 
 export type { ColumnDef } from "@tanstack/react-table";
 
@@ -55,6 +56,8 @@ export interface DataTableProps<T> {
   manual?: { footer?: ReactNode };
   getRowId?: (row: T) => string;
   rowClassName?: (row: T) => string | undefined;
+  /** Makes rows clickable (and reachable with the keyboard). */
+  onRowClick?: (row: T) => void;
   toolbar?: ReactNode;
 }
 
@@ -68,6 +71,7 @@ export function DataTable<T>({
   manual,
   getRowId,
   rowClassName,
+  onRowClick,
   toolbar,
 }: DataTableProps<T>) {
   const [local, setLocal] = useState(FIRST);
@@ -155,7 +159,13 @@ export function DataTable<T>({
         <TableBody>
           {rows.length ? (
             rows.map((row) => (
-              <TableRow key={row.id} className={rowClassName?.(row.original)}>
+              <TableRow
+                key={row.id}
+                className={cn(onRowClick && "cursor-pointer", rowClassName?.(row.original))}
+                tabIndex={onRowClick ? 0 : undefined}
+                onClick={onRowClick && (() => onRowClick(row.original))}
+                onKeyDown={onRowClick && ((e) => e.key === "Enter" && onRowClick(row.original))}
+              >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id} className={cell.column.columnDef.meta?.className}>
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
