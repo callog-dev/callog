@@ -49,7 +49,7 @@ export class TelegramPoller implements OnApplicationBootstrap, OnApplicationShut
 
   onApplicationBootstrap(): void {
     if (this.env.ROLE === "api") return;
-    this.connections.onConnected((connection) => void this.start(connection));
+    this.connections.onChanged(() => void this.loops.reconcile());
     this.loops.watch();
   }
 

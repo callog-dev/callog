@@ -7,12 +7,11 @@ import { telegramChats, telegramConnections } from "../db/schema";
 import { TELEGRAM_API_FACTORY, type TelegramApi, type TelegramApiFactory } from "./telegram-api";
 
 export type TelegramConnection = typeof telegramConnections.$inferSelect;
-export type TelegramConnectedListener = (connection: TelegramConnection) => void;
 
 @Injectable()
 export class TelegramConnectionsService {
   private readonly clients = new Map<string, { sealed: string; api: TelegramApi }>();
-  private readonly connectedListeners: TelegramConnectedListener[] = [];
+  private readonly changeListeners: (() => void)[] = [];
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -20,9 +19,24 @@ export class TelegramConnectionsService {
     @Inject(TELEGRAM_API_FACTORY) private readonly createApi: TelegramApiFactory,
   ) {}
 
-  /** Lets the poller start listening for a newly connected bot. */
-  onConnected(listener: TelegramConnectedListener): void {
-    this.connectedListeners.push(listener);
+  /** Lets the poller start or stop at once when a bot is connected or disconnected here. */
+  onChanged(listener: () => void): void {
+    this.changeListeners.push(listener);
+  }
+
+  /** Forgets the bot and the groups it was in. False if no bot was connected. */
+  async disconnect(tenantId: string): Promise<boolean> {
+    const removed = await this.db.transaction(async (tx) => {
+      await tx.delete(telegramChats).where(eq(telegramChats.tenantId, tenantId));
+      return tx
+        .delete(telegramConnections)
+        .where(eq(telegramConnections.tenantId, tenantId))
+        .returning({ tenantId: telegramConnections.tenantId });
+    });
+    this.clients.delete(tenantId);
+    if (removed.length === 0) return false;
+    this.changed();
+    return true;
   }
 
   async connect(tenantId: string, botToken: string): Promise<TelegramConnection> {
@@ -62,7 +76,7 @@ export class TelegramConnectionsService {
       return row!;
     });
     this.clients.delete(tenantId);
-    for (const listener of this.connectedListeners) listener(connection);
+    this.changed();
     return connection;
   }
 
@@ -86,6 +100,10 @@ export class TelegramConnectionsService {
     const api = this.createApi(this.secrets.decrypt(connection.botTokenEncrypted));
     this.clients.set(tenantId, { sealed: connection.botTokenEncrypted, api });
     return api;
+  }
+
+  private changed(): void {
+    for (const listener of this.changeListeners) listener();
   }
 
   async saveOffset(tenantId: string, lastUpdateId: number): Promise<void> {

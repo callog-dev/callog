@@ -47,9 +47,14 @@ export class AdminTelegramController {
     try {
       return await this.sender.send(tenantId, chatId, { text, buttons: [] });
     } catch (err) {
-      if (err instanceof TelegramApiError)
-        throw new BadRequestException(`Telegram error: ${err.description}`);
-      throw err;
+      throw asBadRequest(err);
     }
   }
+}
+
+/** A Telegram refusal is the caller's to fix (unknown chat, bot not a member): a 400. */
+export function asBadRequest(err: unknown): unknown {
+  return err instanceof TelegramApiError
+    ? new BadRequestException(`Telegram error: ${err.description}`)
+    : err;
 }

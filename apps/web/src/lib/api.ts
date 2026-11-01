@@ -234,6 +234,13 @@ export const adminApi = {
   connectTelegram: (botToken: string) =>
     request<{ bot: string }>("PUT", "/api/admin/telegram", { botToken }),
   telegramChats: () => request<TelegramChat[]>("GET", "/api/admin/telegram/chats"),
+  disconnectSlack: () => request<void>("DELETE", "/api/admin/slack"),
+  syncSlack: () => request<{ status: "queued" }>("POST", "/api/admin/slack/sync"),
+  slackTestMessage: (channel: string) =>
+    request<{ ok: true }>("POST", "/api/admin/slack/test-message", { channel }),
+  disconnectTelegram: () => request<void>("DELETE", "/api/admin/telegram"),
+  telegramTestMessage: (chatId: string) =>
+    request<{ ok: true }>("POST", "/api/admin/telegram/test-message", { chatId }),
   status: () => request<AdminStatus>("GET", "/api/admin/status"),
   reloadConfig: () =>
     request<{ status: string; reason?: string }>("POST", "/api/admin/config/reload"),

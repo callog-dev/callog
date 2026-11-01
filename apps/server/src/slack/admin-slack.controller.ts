@@ -79,8 +79,12 @@ export class AdminSlackController {
         ? await this.sender.postToChannel(tenantId, input.channel, { text: input.text })
         : await this.sender.postDirect(tenantId, input.slackUserId!, { text: input.text });
     } catch (err) {
-      if (err instanceof SlackApiError) throw new BadRequestException(`Slack error: ${err.code}`);
-      throw err;
+      throw asBadRequest(err);
     }
   }
+}
+
+/** A Slack refusal is the caller's to fix (unknown channel, bot not invited): a 400. */
+export function asBadRequest(err: unknown): unknown {
+  return err instanceof SlackApiError ? new BadRequestException(`Slack error: ${err.code}`) : err;
 }

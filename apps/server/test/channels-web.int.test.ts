@@ -5,7 +5,7 @@ import { tenants } from "../src/db/schema";
 import type { TelegramChat } from "../src/telegram/telegram-api";
 import { TelegramUpdates } from "../src/telegram/telegram-updates";
 import type { FakeGithub } from "./setup/fake-github";
-import { BAD_SLACK_APP_TOKEN, GOOD_SLACK_TOKEN } from "./setup/fake-slack";
+import { BAD_SLACK_APP_TOKEN, GOOD_SLACK_TOKEN, type FakeSlack } from "./setup/fake-slack";
 import {
   GOOD_TELEGRAM_TOKEN,
   OTHER_TELEGRAM_TOKEN,
@@ -20,13 +20,14 @@ describe("connecting Slack and Telegram from the web UI (integration)", () => {
   let app: NestFastifyApplication;
   let github: FakeGithub;
   let telegram: FakeTelegram;
+  let slack: FakeSlack;
   let githubOAuthUsers: Map<string, { id: number; login: string }>;
   let db: Db;
   let tenantId: string;
   let cookie: string;
   let seq = 0;
 
-  const call = (method: "GET" | "PUT", url: string, payload?: object) =>
+  const call = (method: "GET" | "PUT" | "POST" | "DELETE", url: string, payload?: object) =>
     app.inject({ method, url, headers: { cookie }, ...(payload ? { payload } : {}) });
 
   /** Feeds a Bot API update to the tenant's bot as the poller would. */
@@ -40,7 +41,7 @@ describe("connecting Slack and Telegram from the web UI (integration)", () => {
     });
 
   beforeAll(async () => {
-    ({ app, github, telegram, githubOAuthUsers } = await createTestApp());
+    ({ app, github, telegram, slack, githubOAuthUsers } = await createTestApp());
     db = app.get(DB);
   });
   afterAll(() => app?.close());
@@ -85,6 +86,33 @@ describe("connecting Slack and Telegram from the web UI (integration)", () => {
       expect((await call("GET", "/api/admin/onboarding")).json().steps.slack.done).toBe(false);
     });
 
+    it("syncs, sends a test message and disconnects without ever returning a token", async () => {
+      await call("PUT", "/api/admin/slack", {
+        botToken: GOOD_SLACK_TOKEN,
+        appToken: "xapp-test-good",
+      });
+      expect((await call("POST", "/api/admin/slack/sync")).statusCode).toBe(202);
+
+      slack.posted = [];
+      const sent = await call("POST", "/api/admin/slack/test-message", { channel: "#alerts" });
+      expect(sent.statusCode).toBe(201);
+      expect(slack.posted).toEqual([
+        expect.objectContaining({ channel: "C0ALERTS1", message: { text: expect.any(String) } }),
+      ]);
+      const missing = await call("POST", "/api/admin/slack/test-message", { channel: "#nope" });
+      expect(missing.statusCode).toBe(400);
+
+      const status = (await call("GET", "/api/admin/status")).payload;
+      expect(status).toContain("test-team");
+      expect(status).not.toContain(GOOD_SLACK_TOKEN);
+      expect(status).not.toContain("xapp-test-good");
+
+      expect((await call("DELETE", "/api/admin/slack")).statusCode).toBe(204);
+      expect((await call("GET", "/api/admin/status")).json().slack).toBeNull();
+      expect((await call("DELETE", "/api/admin/slack")).statusCode).toBe(404);
+      expect((await call("POST", "/api/admin/slack/sync")).statusCode).toBe(404);
+    });
+
     it("requires the app-level token for /notify", async () => {
       const res = await call("PUT", "/api/admin/slack", { botToken: GOOD_SLACK_TOKEN });
       expect(res.statusCode).toBe(400);
@@ -125,6 +153,21 @@ describe("connecting Slack and Telegram from the web UI (integration)", () => {
 
       await call("PUT", "/api/admin/telegram", { botToken: OTHER_TELEGRAM_TOKEN });
       expect((await call("GET", "/api/admin/telegram/chats")).json()).toEqual([]);
+    });
+
+    it("sends a test message and disconnects, forgetting the groups", async () => {
+      await call("PUT", "/api/admin/telegram", { botToken: GOOD_TELEGRAM_TOKEN });
+      await membership(group(-1001, "Alerts"), "left", "member");
+
+      telegram.sent = [];
+      const sent = await call("POST", "/api/admin/telegram/test-message", { chatId: "-1001" });
+      expect(sent.statusCode).toBe(201);
+      expect(telegram.sent.map((m) => m.chatId)).toEqual(["-1001"]);
+
+      expect((await call("DELETE", "/api/admin/telegram")).statusCode).toBe(204);
+      expect((await call("GET", "/api/admin/status")).json().telegram).toBeNull();
+      expect((await call("GET", "/api/admin/telegram/chats")).json()).toEqual([]);
+      expect((await call("DELETE", "/api/admin/telegram")).statusCode).toBe(404);
     });
 
     it("explains a rejected token", async () => {

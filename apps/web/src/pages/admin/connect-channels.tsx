@@ -20,7 +20,7 @@ const CREATE_SLACK_APP = `https://api.slack.com/apps?new_app=1&manifest_yaml=${e
 /** While the dialog is open the operator is adding the bot to groups: show them as they come. */
 const CHATS_REFRESH_MS = 5_000;
 
-function useChannelsChanged() {
+export function useChannelsChanged() {
   const client = useQueryClient();
   return () => {
     void client.invalidateQueries({ queryKey: ["admin", "onboarding"] });
@@ -196,7 +196,8 @@ export function TelegramConnectDialog({
   );
 }
 
-function TelegramChats() {
+/** The groups the bot is in; `action` replaces the copy button of each row. */
+export function TelegramChats({ action }: { action?: (chatId: string) => ReactNode }) {
   const chats = useQuery({
     queryKey: ["admin", "telegram-chats"],
     queryFn: adminApi.telegramChats,
@@ -215,17 +216,21 @@ function TelegramChats() {
               <div className="truncate font-medium">{c.title ?? c.chatId}</div>
               <code className="text-xs text-muted-foreground">{line}</code>
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={`Copy ${line}`}
-              onClick={() =>
-                navigator.clipboard.writeText(line).then(() => toast.success("Copied"))
-              }
-            >
-              <Copy />
-            </Button>
+            {action ? (
+              action(c.chatId)
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`Copy ${line}`}
+                onClick={() =>
+                  navigator.clipboard.writeText(line).then(() => toast.success("Copied"))
+                }
+              >
+                <Copy />
+              </Button>
+            )}
           </li>
         );
       })}

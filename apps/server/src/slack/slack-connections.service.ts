@@ -17,7 +17,7 @@ export type SlackConnection = typeof slackConnections.$inferSelect;
 @Injectable()
 export class SlackConnectionsService {
   private readonly clients = new Map<string, { sealed: string; api: SlackApi }>();
-  private readonly connectedListeners: ((connection: SlackConnection) => void)[] = [];
+  private readonly changeListeners: (() => void)[] = [];
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -46,8 +46,20 @@ export class SlackConnectionsService {
       .onConflictDoUpdate({ target: slackConnections.tenantId, set: values })
       .returning();
     this.clients.delete(tenantId);
-    for (const listener of this.connectedListeners) listener(connection!);
+    this.changed();
     return connection!;
+  }
+
+  /** Forgets the workspace's tokens; people and their accounts stay. False if none was stored. */
+  async disconnect(tenantId: string): Promise<boolean> {
+    const removed = await this.db
+      .delete(slackConnections)
+      .where(eq(slackConnections.tenantId, tenantId))
+      .returning({ tenantId: slackConnections.tenantId });
+    this.clients.delete(tenantId);
+    if (removed.length === 0) return false;
+    this.changed();
+    return true;
   }
 
   async findByTeam(teamId: string): Promise<SlackConnection | undefined> {
@@ -77,9 +89,16 @@ export class SlackConnectionsService {
     return api;
   }
 
-  /** Lets the Socket Mode runner (re)connect when a workspace is connected. */
-  onConnected(listener: (connection: SlackConnection) => void): void {
-    this.connectedListeners.push(listener);
+  /**
+   * Lets the Socket Mode runner open or close a socket at once when a workspace is connected
+   * or disconnected here, instead of on its next reconcile.
+   */
+  onChanged(listener: () => void): void {
+    this.changeListeners.push(listener);
+  }
+
+  private changed(): void {
+    for (const listener of this.changeListeners) listener();
   }
 
   listAll(): Promise<SlackConnection[]> {
