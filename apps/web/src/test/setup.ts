@@ -10,6 +10,18 @@ globalThis.ResizeObserver ??= class {
   disconnect() {}
 };
 
+// The sidebar asks whether it is on a phone; jsdom has no media queries.
+window.matchMedia ??= (query: string) =>
+  ({
+    matches: false,
+    media: query,
+    addEventListener() {},
+    removeEventListener() {},
+  }) as unknown as MediaQueryList;
+
+// cmdk keeps the selected item in view.
+Element.prototype.scrollIntoView ??= () => {};
+
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
   cleanup();

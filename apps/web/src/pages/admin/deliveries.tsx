@@ -33,6 +33,8 @@ const STATUS_VARIANT: Record<
   failed: "destructive",
 };
 
+const POLL_MS = 10_000;
+
 const STATUSES = ["delivered", "partially_failed", "failed", "processing", "accepted"] as const;
 
 const PERIODS = [
@@ -56,6 +58,7 @@ function describeSource(s: NotificationRow["source"]): { key: string | null; lab
 const FILTERS = { status: "all", route: "all", source: "", period: "all" };
 
 export function DeliveriesTab() {
+  const client = useQueryClient();
   const [filters, setFilters] = useUrlState(FILTERS);
   const { id } = useParams();
   const navigate = useNavigate();
@@ -77,6 +80,15 @@ export function DeliveriesTab() {
   });
   const routes = useQuery({ queryKey: ["routes"], queryFn: api.routes });
   const rows = useMemo(() => list.data?.pages.flatMap((p) => p.items) ?? [], [list.data]);
+  // Counts what arrived above the top row; the loaded pages and the scroll position stay.
+  const top = rows[0]?.id;
+  const newer = useQuery({
+    queryKey: ["admin", "notifications-newer", query, top],
+    queryFn: () => adminApi.notificationCount({ ...query, after: top! }),
+    refetchInterval: POLL_MS,
+    enabled: top !== undefined,
+  });
+  const newCount = newer.data?.count ?? 0;
   const columns = useMemo(() => deliveryColumns((source) => setFilters({ source })), [setFilters]);
   const filtered = Object.entries(filters).some(
     ([key, value]) => value !== FILTERS[key as keyof typeof FILTERS],
@@ -124,6 +136,24 @@ export function DeliveriesTab() {
         )}
       </div>
 
+      {newCount > 0 && (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="w-full"
+          onClick={() => {
+            // Back to the first page, refetched in place (no loading state, no older pages).
+            const key = ["admin", "notifications", query];
+            client.setQueryData<typeof list.data>(
+              key,
+              (data) => data && { pages: data.pages.slice(0, 1), pageParams: [undefined] },
+            );
+            void client.invalidateQueries({ queryKey: key, exact: true });
+          }}
+        >
+          {newCount === 1 ? "1 new notification" : `${newCount} new notifications`}: show
+        </Button>
+      )}
       {list.isPending ? (
         <Skeleton className="h-48 w-full" />
       ) : list.isError ? (

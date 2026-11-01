@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useUrlState } from "@/hooks/use-url-state";
 import { cn } from "@/lib/utils";
 
@@ -219,14 +220,14 @@ function SearchBox({
   onChange: (q: string) => void;
 }) {
   const [text, setText] = useState(value);
-  const commit = useRef(onChange);
-  commit.current = onChange;
+  const typed = useDebouncedValue(text);
+  const commit = useRef({ onChange, value });
+  commit.current = { onChange, value };
   useEffect(() => setText(value), [value]);
+  // Only a pause in typing commits; a new `value` from outside (a reset) does not.
   useEffect(() => {
-    if (text === value) return;
-    const timer = setTimeout(() => commit.current(text), 200);
-    return () => clearTimeout(timer);
-  }, [text, value]);
+    if (typed !== commit.current.value) commit.current.onChange(typed);
+  }, [typed]);
   return (
     <div className="relative w-full max-w-xs">
       <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />

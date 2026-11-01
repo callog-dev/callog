@@ -343,6 +343,13 @@ export const adminApi = {
       "POST",
       `/api/admin/routes/${encodeURIComponent(routeId)}/test`,
     ),
+  notificationCount: (params: Record<string, string | undefined> & { after: string }) =>
+    request<{ count: number }>(
+      "GET",
+      `/api/admin/notifications/count?${new URLSearchParams(
+        Object.entries(params).filter(([, v]) => v) as [string, string][],
+      )}`,
+    ),
   notification: (id: string) =>
     request<NotificationDetails>("GET", `/api/admin/notifications/${id}`),
   retryNotification: (id: string) =>

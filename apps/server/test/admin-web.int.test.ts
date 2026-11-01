@@ -285,6 +285,22 @@ teams:
     expect((await call("GET", "/api/admin/notifications?period=24h")).json().items).toEqual([]);
     expect((await call("GET", "/api/admin/notifications?period=7d")).json().items).toHaveLength(1);
 
+    const [newer] = await db
+      .insert(notifications)
+      .values({
+        tenantId,
+        routeId: "r",
+        configVersionId: versionId,
+        source: { type: "api_key", apiKeyId: "k", apiKeyName: "ci" },
+        status: "delivered",
+      })
+      .returning();
+    const count = (query: string) =>
+      call("GET", `/api/admin/notifications/count?${query}`).then((r) => r.json().count);
+    expect(await count(`after=${n!.id}`)).toBe(1);
+    expect(await count(`after=${n!.id}&status=failed`)).toBe(0);
+    expect(await count(`after=${newer!.id}`)).toBe(0);
+
     const details = (await call("GET", `/api/admin/notifications/${n!.id}`)).json();
     expect(details).toMatchObject({
       data: { branch: "main" },

@@ -3,6 +3,7 @@ import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter, useLocation } from "react-router";
 import { ConfirmProvider } from "@/components/confirm";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 /** Renders inside the app's providers at `url`; `location()` reads where the page navigated. */
 export function renderPage(ui: ReactNode, url = "/") {
@@ -15,12 +16,14 @@ export function renderPage(ui: ReactNode, url = "/") {
   }
   const result = render(
     <QueryClientProvider client={client}>
-      <ConfirmProvider>
-        <MemoryRouter initialEntries={[url]}>
-          {ui}
-          <Spy />
-        </MemoryRouter>
-      </ConfirmProvider>
+      <TooltipProvider>
+        <ConfirmProvider>
+          <MemoryRouter initialEntries={[url]}>
+            {ui}
+            <Spy />
+          </MemoryRouter>
+        </ConfirmProvider>
+      </TooltipProvider>
     </QueryClientProvider>,
   );
   return { ...result, location: () => seen.current };
