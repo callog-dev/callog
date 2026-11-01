@@ -8,10 +8,10 @@ import {
 } from "@nestjs/common";
 import { ownValue } from "@callog/config-schema";
 import { and, eq, gt, lte } from "drizzle-orm";
+import { AuditService, type AuditActor } from "../audit/audit.service";
 import { sha256Hex } from "../crypto/digest";
 import { DB, type Db } from "../db/db";
-import type { AdminActor } from "../identity/tenant-admins.service";
-import { auditLog, deliveries, idempotencyKeys, notifications } from "../db/schema";
+import { deliveries, idempotencyKeys, notifications } from "../db/schema";
 import { ProducerAuthService, type Producer } from "../producers/producer-auth.service";
 import { QueueService } from "../queue/queue.service";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
@@ -49,6 +49,7 @@ export class NotificationsService {
     private readonly dataValidator: DataValidator,
     private readonly queue: QueueService,
     private readonly metrics: MetricsService,
+    private readonly audit: AuditService,
   ) {}
 
   async accept(
@@ -165,7 +166,7 @@ export class NotificationsService {
    * `DeliveryService.deliver` sending exactly the pending deliveries of an unfinished
    * notification.
    */
-  async retry(tenantId: string, notificationId: string, actor: AdminActor): Promise<void> {
+  async retry(tenantId: string, notificationId: string, actor: AuditActor): Promise<void> {
     await this.db.transaction(async (tx) => {
       const [notification] = await tx
         .select({ status: notifications.status, threadKey: notifications.threadKey })
@@ -186,13 +187,15 @@ export class NotificationsService {
         .set({ status: "accepted" })
         .where(eq(notifications.id, notificationId));
       await this.enqueueDelivery(tx, tenantId, notificationId, notification.threadKey);
-      await tx.insert(auditLog).values({
-        tenantId,
-        action: "notification.retried",
-        actorPersonId: actor.personId,
-        actorGithubLogin: actor.personId ? null : actor.githubLogin,
-        details: { notificationId, deliveries: retried.length },
-      });
+      await this.audit.record(
+        {
+          tenantId,
+          action: "notification.retried",
+          actor,
+          details: { notificationId, deliveries: retried.length },
+        },
+        tx,
+      );
     });
   }
 

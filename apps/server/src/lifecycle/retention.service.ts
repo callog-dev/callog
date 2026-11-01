@@ -26,6 +26,11 @@ export interface RetentionReport {
   linkTokens: number;
 }
 
+export type TenantRetentionReport = Pick<
+  RetentionReport,
+  "notifications" | "configVersions" | "unmappedRecipients"
+>;
+
 /** Deletes data past its retention. Idempotent; safe to run any time. */
 @Injectable()
 export class RetentionService {
@@ -49,55 +54,10 @@ export class RetentionService {
 
     // Inactive tenants (app uninstalled) keep their data, but not past retention.
     for (const tenant of await this.tenants.listAll()) {
-      const active = await this.configs.getActive(tenant.id);
-      const days = active?.config.config.retention_days ?? DEFAULT_RETENTION_DAYS;
-      const cutoff = new Date(now.getTime() - days * DAY_MS);
-
-      // Deliveries and idempotency keys go with their notification (FK cascade). Unfinished
-      // ones stay until the worker settles them (relevant for very short retention).
-      report.notifications += (
-        await this.db
-          .delete(notifications)
-          .where(
-            and(
-              eq(notifications.tenantId, tenant.id),
-              lt(notifications.createdAt, cutoff),
-              notInArray(notifications.status, ["accepted", "processing"]),
-            ),
-          )
-          .returning({ id: notifications.id })
-      ).length;
-
-      report.configVersions += (
-        await this.db
-          .delete(configVersions)
-          .where(
-            and(
-              eq(configVersions.tenantId, tenant.id),
-              lt(configVersions.createdAt, cutoff),
-              active ? ne(configVersions.id, active.versionId) : undefined,
-              notExists(
-                this.db
-                  .select({ one: sql`1` })
-                  .from(notifications)
-                  .where(eq(notifications.configVersionId, configVersions.id)),
-              ),
-            ),
-          )
-          .returning({ id: configVersions.id })
-      ).length;
-
-      report.unmappedRecipients += (
-        await this.db
-          .delete(unmappedRecipients)
-          .where(
-            and(
-              eq(unmappedRecipients.tenantId, tenant.id),
-              lt(unmappedRecipients.lastSeenAt, cutoff),
-            ),
-          )
-          .returning({ ref: unmappedRecipients.ref })
-      ).length;
+      const part = await this.runTenant(tenant.id, now);
+      report.notifications += part.notifications;
+      report.configVersions += part.configVersions;
+      report.unmappedRecipients += part.unmappedRecipients;
     }
 
     // Identities, preferences and link tokens of the person go with it (FK cascade).
@@ -129,5 +89,49 @@ export class RetentionService {
 
     this.logger.log(`Retention: ${JSON.stringify(report)}`);
     return report;
+  }
+
+  /** The tenant's own data past its retention (people and tokens are cleaned up globally). */
+  async runTenant(tenantId: string, now = new Date()): Promise<TenantRetentionReport> {
+    const active = await this.configs.getActive(tenantId);
+    const days = active?.config.config.retention_days ?? DEFAULT_RETENTION_DAYS;
+    const cutoff = new Date(now.getTime() - days * DAY_MS);
+
+    // Deliveries and idempotency keys go with their notification (FK cascade). Unfinished
+    // ones stay until the worker settles them (relevant for very short retention).
+    const notificationsDeleted = await this.db
+      .delete(notifications)
+      .where(
+        and(
+          eq(notifications.tenantId, tenantId),
+          lt(notifications.createdAt, cutoff),
+          notInArray(notifications.status, ["accepted", "processing"]),
+        ),
+      );
+
+    const configVersionsDeleted = await this.db.delete(configVersions).where(
+      and(
+        eq(configVersions.tenantId, tenantId),
+        lt(configVersions.createdAt, cutoff),
+        active ? ne(configVersions.id, active.versionId) : undefined,
+        notExists(
+          this.db
+            .select({ one: sql`1` })
+            .from(notifications)
+            .where(eq(notifications.configVersionId, configVersions.id)),
+        ),
+      ),
+    );
+
+    const unmappedDeleted = await this.db
+      .delete(unmappedRecipients)
+      .where(
+        and(eq(unmappedRecipients.tenantId, tenantId), lt(unmappedRecipients.lastSeenAt, cutoff)),
+      );
+    return {
+      notifications: notificationsDeleted.rowCount ?? 0,
+      configVersions: configVersionsDeleted.rowCount ?? 0,
+      unmappedRecipients: unmappedDeleted.rowCount ?? 0,
+    };
   }
 }

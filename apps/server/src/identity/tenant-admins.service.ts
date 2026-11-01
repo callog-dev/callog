@@ -1,19 +1,14 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { AuditService, type AuditActor } from "../audit/audit.service";
 import { DB, type Db, type DbOrTx } from "../db/db";
 import { auditLog, persons, tenantAdmins } from "../db/schema";
 
 const ROLE_ACTIONS = ["admin.granted", "admin.revoked"] as const;
 export type AdminRoleAction = (typeof ROLE_ACTIONS)[number];
 
-/** Who changes a role: a person, or an org owner not linked to one yet. */
-export interface AdminActor {
-  personId: string | null;
-  githubLogin: string | null;
-}
-
-const SYSTEM: AdminActor = { personId: null, githubLogin: null };
+const SYSTEM: AuditActor = { personId: null, githubLogin: null };
 
 /**
  * The admin role granted inside the product. GitHub org owners are admins
@@ -23,7 +18,10 @@ const SYSTEM: AdminActor = { personId: null, githubLogin: null };
 export class TenantAdminsService {
   private readonly logger = new Logger(TenantAdminsService.name);
 
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly auditService: AuditService,
+  ) {}
 
   async has(tenantId: string, personId: string): Promise<boolean> {
     const [row] = await this.db
@@ -49,7 +47,7 @@ export class TenantAdminsService {
   }
 
   /** Idempotent: granting an existing admin changes nothing and logs nothing. */
-  async grant(tenantId: string, personId: string, actor: AdminActor): Promise<boolean> {
+  async grant(tenantId: string, personId: string, actor: AuditActor): Promise<boolean> {
     const rows = await this.db
       .insert(tenantAdmins)
       .values({ tenantId, personId, grantedBy: actor.personId })
@@ -60,7 +58,7 @@ export class TenantAdminsService {
     return true;
   }
 
-  async revoke(tenantId: string, personId: string, actor: AdminActor): Promise<boolean> {
+  async revoke(tenantId: string, personId: string, actor: AuditActor): Promise<boolean> {
     return this.remove(this.db, tenantId, personId, actor, undefined);
   }
 
@@ -98,7 +96,7 @@ export class TenantAdminsService {
     executor: DbOrTx,
     tenantId: string,
     personId: string,
-    actor: AdminActor,
+    actor: AuditActor,
     details: Record<string, unknown> | undefined,
   ): Promise<boolean> {
     const rows = await executor
@@ -110,21 +108,17 @@ export class TenantAdminsService {
     return true;
   }
 
-  private async record(
+  private record(
     executor: DbOrTx,
     tenantId: string,
     action: AdminRoleAction,
     subjectPersonId: string,
-    actor: AdminActor,
+    actor: AuditActor,
     details?: Record<string, unknown>,
   ): Promise<void> {
-    await executor.insert(auditLog).values({
-      tenantId,
-      action,
-      subjectPersonId,
-      actorPersonId: actor.personId,
-      actorGithubLogin: actor.personId ? null : actor.githubLogin,
-      details: details ?? null,
-    });
+    return this.auditService.record(
+      { tenantId, action, subjectPersonId, actor, details },
+      executor,
+    );
   }
 }

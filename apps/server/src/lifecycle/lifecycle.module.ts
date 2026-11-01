@@ -11,5 +11,6 @@ import { RetentionService } from "./retention.service";
   imports: [TenantsModule, TenantConfigModule, IdentityModule, SlackModule],
   controllers: [AdminLifecycleController],
   providers: [RetentionService, LifecycleJobs],
+  exports: [RetentionService, LifecycleJobs],
 })
 export class LifecycleModule {}

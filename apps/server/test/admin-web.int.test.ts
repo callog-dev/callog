@@ -384,6 +384,43 @@ teams:
     expect((await call("GET", `/api/admin/people/${missing}`)).statusCode).toBe(404);
   });
 
+  it("runs maintenance for this workspace only and remembers the last run", async () => {
+    expect((await call("GET", "/api/admin/maintenance")).json()).toEqual({
+      sync: null,
+      retention: null,
+    });
+    const bobCookie = await webLogin(app, githubOAuthUsers, { id: 12, login: "bob-gh" });
+    expect(
+      (await call("POST", "/api/admin/maintenance/sync", undefined, bobCookie)).statusCode,
+    ).toBe(403);
+
+    const sync = await call("POST", "/api/admin/maintenance/sync");
+    expect(sync.statusCode).toBe(202);
+    expect(sync.json()).toEqual({ status: "queued" });
+
+    const old = new Date(Date.now() - 400 * 86_400_000);
+    await db.insert(notifications).values({
+      tenantId,
+      routeId: "r",
+      configVersionId: versionId,
+      source: { type: "api_key", apiKeyId: "k", apiKeyName: "ci" },
+      status: "delivered",
+      createdAt: old,
+    });
+    const retention = await call("POST", "/api/admin/maintenance/retention");
+    expect(retention.json()).toEqual({
+      notifications: 1,
+      configVersions: 0,
+      unmappedRecipients: 0,
+    });
+
+    const last = (await call("GET", "/api/admin/maintenance")).json();
+    expect(last.sync).toMatchObject({ at: expect.any(String) });
+    expect(last.retention).toMatchObject({ details: { notifications: 1 } });
+    // The role log on the Admins page lists role changes only.
+    expect((await call("GET", "/api/admin/admins")).json().audit).toEqual([]);
+  });
+
   it("retries a failed notification once", async () => {
     const [n] = await db
       .insert(notifications)

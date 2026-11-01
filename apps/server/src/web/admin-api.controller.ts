@@ -31,6 +31,9 @@ import {
 } from "../db/schema";
 import { GithubAppService } from "../github/github-app.service";
 import { PeopleService } from "../identity/people.service";
+import { AuditService } from "../audit/audit.service";
+import { LifecycleJobs } from "../lifecycle/lifecycle.jobs";
+import { RetentionService } from "../lifecycle/retention.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { PreferencesService } from "../identity/preferences.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
@@ -60,6 +63,7 @@ import { AdminSessionGuard } from "./admin-session.guard";
 import type { SessionRequest } from "./session.guard";
 
 const PAGE = 50;
+const MAINTENANCE = { sync: "maintenance.sync", retention: "maintenance.retention" } as const;
 const TEST_TEXT = "Callog is connected: this is a test message from the admin UI.";
 const slackTestBody = z.object({ channel: z.string().trim().min(1) });
 const telegramTestBody = z.object({ chatId: z.string().trim().min(1) });
@@ -123,6 +127,9 @@ export class AdminApiController {
     private readonly pipeline: NotificationsService,
     private readonly slackSender: SlackSender,
     private readonly preferences: PreferencesService,
+    private readonly audit: AuditService,
+    private readonly lifecycle: LifecycleJobs,
+    private readonly retention: RetentionService,
     private readonly telegramSender: TelegramSender,
   ) {}
 
@@ -805,6 +812,44 @@ export class AdminApiController {
       warnings: issues.warnings ?? [],
       active: version.id === active?.versionId,
     };
+  }
+
+  /** When each maintenance task last ran from here, and what it did. */
+  @Get("maintenance")
+  async maintenance(@Req() req: SessionRequest) {
+    const latest = await this.audit.latest(req.session!.tenantId, Object.values(MAINTENANCE));
+    return {
+      sync: latest.get(MAINTENANCE.sync) ?? null,
+      retention: latest.get(MAINTENANCE.retention) ?? null,
+    };
+  }
+
+  /** Queues the Slack and GitHub people syncs of this workspace, like the hourly job. */
+  @Post("maintenance/sync")
+  @HttpCode(202)
+  async syncPeople(@Req() req: SessionRequest) {
+    const { tenantId, personId, githubLogin } = req.session!;
+    await this.lifecycle.syncTenant(tenantId);
+    await this.audit.record({
+      tenantId,
+      action: MAINTENANCE.sync,
+      actor: { personId, githubLogin },
+    });
+    return { status: "queued" };
+  }
+
+  /** Deletes this workspace's notifications and config versions past `retention_days` now. */
+  @Post("maintenance/retention")
+  async runRetention(@Req() req: SessionRequest) {
+    const { tenantId, personId, githubLogin } = req.session!;
+    const report = await this.retention.runTenant(tenantId);
+    await this.audit.record({
+      tenantId,
+      action: MAINTENANCE.retention,
+      actor: { personId, githubLogin },
+      details: report,
+    });
+    return report;
   }
 
   @Post("config/reload")
