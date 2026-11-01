@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { BellRing, ChevronsUpDown, LogOut, Moon, Sun } from "lucide-react";
+import { BellRing, ChevronsUpDown, LogOut, Moon, Search, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Link } from "react-router";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -27,7 +27,15 @@ import {
 import { api, type Me } from "@/lib/api";
 import { GENERAL, WORKSPACE, type NavItem } from "@/lib/nav";
 
-export function AppSidebar({ me, current }: { me: Me; current: NavItem | undefined }) {
+export function AppSidebar({
+  me,
+  current,
+  onSearch,
+}: {
+  me: Me;
+  current: NavItem | undefined;
+  onSearch: () => void;
+}) {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -41,6 +49,13 @@ export function AppSidebar({ me, current }: { me: Me; current: NavItem | undefin
                 <span className="truncate font-semibold">Callog</span>
                 <span className="truncate text-xs text-muted-foreground">{me.org}</span>
               </div>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton tooltip="Search" onClick={onSearch}>
+              <Search />
+              <span>Search</span>
+              <kbd className="ml-auto text-xs text-muted-foreground">⌘K</kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

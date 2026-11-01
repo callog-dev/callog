@@ -32,9 +32,14 @@ export const WORKSPACE: NavItem[] = [
   { title: "Settings", url: "/manage/settings", icon: Settings },
 ];
 
+/** The pages a person can open. */
+export function visibleNav(isAdmin: boolean): NavItem[] {
+  return [...GENERAL, ...(isAdmin ? WORKSPACE : [])];
+}
+
 /** The nav item a path belongs to: the longest URL that prefixes it. */
 export function navItemFor(pathname: string, isAdmin: boolean): NavItem | undefined {
-  return [...GENERAL, ...(isAdmin ? WORKSPACE : [])]
+  return visibleNav(isAdmin)
     .filter((item) => pathname === item.url || pathname.startsWith(`${item.url}/`))
     .sort((a, b) => b.url.length - a.url.length)[0];
 }

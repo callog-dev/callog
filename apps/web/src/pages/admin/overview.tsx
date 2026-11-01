@@ -14,6 +14,7 @@ export function OverviewTab() {
     queryKey: ["admin", "attention"],
     queryFn: adminApi.attention,
     staleTime: 0,
+    refetchInterval: 30_000,
   });
   if (attention.isPending) return <Skeleton className="h-48 w-full" />;
   if (attention.isError) {

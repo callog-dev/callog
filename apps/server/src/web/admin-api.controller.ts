@@ -98,6 +98,7 @@ const peopleQuery = z.object({
   status: z.enum(["active", "inactive", "all"]).default("active"),
   page: z.coerce.number().int().min(1).default(1),
 });
+const newerQuery = notificationsQuery.omit({ before: true }).extend({ after: z.uuid() });
 const versionsQuery = z.object({ before: z.iso.datetime({ offset: true }).optional() });
 const apiKeyBody = z.object({ name: apiKeyNameSchema });
 const adminBody = z.object({ personId: z.uuid() });
@@ -106,6 +107,26 @@ const adminBody = z.object({ personId: z.uuid() });
 function issuesOf(version: { errors: unknown }) {
   const issues = (version.errors ?? {}) as { errors?: ConfigIssue[]; warnings?: ConfigIssue[] };
   return { errors: issues.errors ?? [], warnings: issues.warnings ?? [] };
+}
+
+function notificationFilter(
+  tenantId: string,
+  { status, route, source, period }: z.infer<typeof notificationsQuery>,
+) {
+  return and(
+    eq(notifications.tenantId, tenantId),
+    status ? eq(notifications.status, status) : undefined,
+    route ? eq(notifications.routeId, route) : undefined,
+    source
+      ? or(
+          sql`${notifications.source}->>'repository' = ${source}`,
+          sql`${notifications.source}->>'apiKeyName' = ${source}`,
+        )
+      : undefined,
+    period
+      ? gte(notifications.createdAt, new Date(Date.now() - PERIOD_DAYS[period] * DAY_MS))
+      : undefined,
+  );
 }
 
 function identityView(i: typeof identities.$inferSelect) {
@@ -228,7 +249,7 @@ export class AdminApiController {
   @Get("notifications")
   async notifications(@Req() req: SessionRequest, @Query() query: unknown) {
     const { tenantId } = req.session!;
-    const { status, route, source, period, before } = parseBody(notificationsQuery, query);
+    const filters = parseBody(notificationsQuery, query);
     const rows = await this.db
       .select({
         id: notifications.id,
@@ -241,19 +262,8 @@ export class AdminApiController {
       .from(notifications)
       .where(
         and(
-          eq(notifications.tenantId, tenantId),
-          status ? eq(notifications.status, status) : undefined,
-          route ? eq(notifications.routeId, route) : undefined,
-          source
-            ? or(
-                sql`${notifications.source}->>'repository' = ${source}`,
-                sql`${notifications.source}->>'apiKeyName' = ${source}`,
-              )
-            : undefined,
-          period
-            ? gte(notifications.createdAt, new Date(Date.now() - PERIOD_DAYS[period] * DAY_MS))
-            : undefined,
-          before ? lt(notifications.createdAt, new Date(before)) : undefined,
+          notificationFilter(tenantId, filters),
+          filters.before ? lt(notifications.createdAt, new Date(filters.before)) : undefined,
         ),
       )
       .orderBy(desc(notifications.createdAt))
@@ -278,6 +288,23 @@ export class AdminApiController {
       items: rows.map((r) => ({ ...r, deliveries: ds.filter((d) => d.notificationId === r.id) })),
       nextBefore: rows.length === PAGE ? rows.at(-1)!.createdAt.toISOString() : null,
     };
+  }
+
+  /** How many notifications matching the filters came after `after` (an id), for "N new". */
+  @Get("notifications/count")
+  async notificationCount(@Req() req: SessionRequest, @Query() query: unknown) {
+    const { after, ...filters } = parseBody(newerQuery, query);
+    const [row] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(notifications)
+      .where(
+        and(
+          notificationFilter(req.session!.tenantId, filters),
+          // Compared in SQL: JS dates drop the microseconds of created_at.
+          sql`${notifications.createdAt} > (select created_at from notifications where id = ${after})`,
+        ),
+      );
+    return { count: row!.count };
   }
 
   /** Full notification incl. payload — admins only. */
