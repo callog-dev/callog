@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { CheckCircle2, CircleAlert, RefreshCw, Send, Hash, Users } from "lucide-react";
-import { toast } from "sonner";
+import { CheckCircle2, CircleAlert, Send, Hash, Users } from "lucide-react";
+
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,20 +11,12 @@ import { ErrorState } from "@/components/states";
 import { adminApi } from "@/lib/api";
 import { ago } from "@/lib/time";
 import { SlackConnectDialog, TelegramConnectDialog } from "./connect-channels";
+import { LoadConfigButton } from "./getting-started";
+import { ConfigIssueList } from "@/components/config-issues";
 
 export function OverviewTab() {
   const status = useQuery({ queryKey: ["admin", "status"], queryFn: adminApi.status });
   const teams = useQuery({ queryKey: ["admin", "teams"], queryFn: adminApi.teams });
-  const client = useQueryClient();
-  const reload = useMutation({
-    mutationFn: adminApi.reloadConfig,
-    onSuccess: (r) => {
-      toast.success(`Config ${r.status}`);
-      void client.invalidateQueries({ queryKey: ["admin", "status"] });
-      void client.invalidateQueries({ queryKey: ["routes"] });
-    },
-    onError: (e) => toast.error(e.message),
-  });
 
   const [dialog, setDialog] = useState<"slack" | "telegram">();
 
@@ -55,13 +47,7 @@ export function OverviewTab() {
             {s.config.active ? "the previous version stays active" : "no config is active"}
           </AlertTitle>
           <AlertDescription>
-            <ul className="mt-1 list-disc pl-4">
-              {errors.map((e, i) => (
-                <li key={i}>
-                  <code>{[e.file, e.path.join(".")].filter(Boolean).join(":")}</code> — {e.message}
-                </li>
-              ))}
-            </ul>
+            <ConfigIssueList issues={errors} />
           </AlertDescription>
         </Alert>
       )}
@@ -85,14 +71,7 @@ export function OverviewTab() {
               {s.configRepo}
               {latest ? ` · ${ago(latest.createdAt)}` : ""}
             </span>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => reload.mutate()}
-              disabled={reload.isPending}
-            >
-              <RefreshCw className={reload.isPending ? "animate-spin" : ""} /> Reload
-            </Button>
+            <LoadConfigButton />
           </CardContent>
         </Card>
         <Card>

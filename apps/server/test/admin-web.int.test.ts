@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DB, type Db } from "../src/db/db";
 import {
+  configVersions,
   deliveries,
   identities,
   notifications,
@@ -289,6 +290,34 @@ teams:
       data: { branch: "main" },
       recipients: ["github:octocat"],
       deliveries: [{ lastError: "slack: channel_not_found", attempts: 1 }],
+    });
+  });
+
+  it("lists config versions and explains a rejected one", async () => {
+    await new Promise((r) => setTimeout(r, 5));
+    const [rejected] = await db
+      .insert(configVersions)
+      .values({
+        tenantId,
+        commitSha: "def",
+        status: "invalid",
+        errors: { errors: [{ file: "routes/r.yaml", path: ["template"], message: "Required" }] },
+      })
+      .returning();
+
+    const list = (await call("GET", "/api/admin/config/versions")).json();
+    expect(list.items).toMatchObject([
+      { commitSha: "def", status: "invalid", errors: 1, routes: 0, active: false },
+      { commitSha: "abc", status: "valid", errors: 0, routes: 1, active: true },
+    ]);
+    expect(list.nextBefore).toBeNull();
+
+    const details = (await call("GET", `/api/admin/config/versions/${rejected!.id}`)).json();
+    expect(details).toMatchObject({
+      commitSha: "def",
+      active: false,
+      errors: [{ file: "routes/r.yaml", path: ["template"], message: "Required" }],
+      previousCommitSha: "abc",
     });
   });
 

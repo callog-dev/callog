@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfigIssueList } from "@/components/config-issues";
 import { adminApi, type Onboarding } from "@/lib/api";
 import { SlackConnectDialog, TelegramConnectDialog } from "./connect-channels";
 import { TestNotificationDialog } from "./test-notification";
@@ -151,13 +152,7 @@ function ConfigRepoHint({
     return (
       <>
         The latest push was rejected; the previous version stays active.
-        <ul className="mt-1 list-disc pl-4">
-          {errors.map((e, i) => (
-            <li key={i}>
-              <code>{[e.file, e.path.join(".")].filter(Boolean).join(" › ")}</code> — {e.message}
-            </li>
-          ))}
-        </ul>
+        <ConfigIssueList issues={errors} />
       </>
     );
   }
@@ -201,7 +196,7 @@ function ConfigRepoHint({
   );
 }
 
-function LoadConfigButton() {
+export function LoadConfigButton() {
   const client = useQueryClient();
   const load = useMutation({
     mutationFn: adminApi.reloadConfig,
