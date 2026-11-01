@@ -1,0 +1,3 @@
+# Built GitHub Actions (committed in releases): keep them out of GitHub's language stats and diffs.
+packages/action/dist/** linguist-generated=true
+packages/cli/dist-action/** linguist-generated=true
