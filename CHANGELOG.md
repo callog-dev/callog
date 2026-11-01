@@ -6,6 +6,34 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
+## [Unreleased]
+
+### Added
+
+- The web UI has a sidebar and a URL for every page, filter and record, so a link opens the same
+  view. Cmd+K (Ctrl+K) jumps to a page, a route, a person or a notification.
+- Overview lists what needs attention, each item linking to where it is fixed.
+- Deliveries: filters by status, route, sender and period; a notification opens at
+  `/manage/deliveries/<id>`; a failed or partially failed notification can be sent again (its
+  failed deliveries only, in its thread); new notifications show up without a reload.
+- People: server-side search by name or account, tabs for unmapped recipients and suggested
+  links, and a page per person with their accounts, role and latest notifications.
+- Config: the history of config pushes, with the errors of a rejected one linked to its files.
+- A page per route; admins also see its template and examples and can send a test.
+- Integrations: disconnect Slack or Telegram, sync people and send test messages from the UI.
+- Settings → Maintenance: sync this workspace's people or apply its retention now.
+- Retries and maintenance runs are recorded in the audit log.
+
+### Changed
+
+- My notifications lists muted routes with an unmute button; muting can be undone from the
+  notification that confirms it.
+- Hashed web assets are served with `Cache-Control: immutable`.
+
+### Operator actions
+
+None.
+
 ## [0.3.0]
 
 ### Added

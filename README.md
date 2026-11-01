@@ -57,7 +57,7 @@ npx smee-client --url https://smee.io/<channel> --target http://localhost:3000/w
 ### 5. Follow the checklist
 
 Sign in with GitHub at `PUBLIC_URL`. Owners of the organization are admins; the **Getting
-started** checklist in Admin covers the rest:
+started** checklist on the Overview page covers the rest:
 
 - **Slack** — a button creates Callog's Slack App from its manifest; paste its bot token and
   app-level token. People are imported from Slack and matched to GitHub accounts.
@@ -74,7 +74,7 @@ started** checklist in Admin covers the rest:
   be reachable from the runner: on a laptop, use the address
   `cloudflared tunnel --url http://localhost:3000` prints (smee relays only webhooks).
 
-Services send with an API key (Admin → API keys) named in the route's
+Services send with an API key (Settings → API keys) named in the route's
 `allowed_sources.api_keys`:
 
 ```bash
@@ -82,6 +82,25 @@ curl -X POST $PUBLIC_URL/v1/notify \
   -H "Authorization: Bearer $NOTIFY_API_KEY" -H "Content-Type: application/json" \
   -d '{"route":"hello","data":{"text":"Deployed"},"recipients":["github:octocat"]}'
 ```
+
+### Day to day
+
+Everyone sees **Routes** (where each route posts, who may send to it) and **My notifications**
+(linked accounts, where personal copies arrive, muted routes). Admins also get:
+
+- **Overview** — what needs attention (a rejected config push, failed notifications, people
+  nobody is linked to), each item linking to where it is fixed.
+- **Deliveries** — every notification with its deliveries and errors, filtered by status,
+  route, sender and period. A failed one can be sent again.
+- **People** and **Teams** — search people by name or account, link accounts by hand, confirm
+  suggested links, see who a team's `members_from` resolves to.
+- **Config** — every push of the config repo, with the errors of a rejected one.
+- **Integrations** — connect, replace or disconnect Slack and Telegram, sync people, send a test
+  message.
+- **Settings** — admins, API keys, and maintenance (sync people or apply retention now).
+
+Every page and filter has its own URL, so a link from a chat opens the same view. Press ⌘K
+(Ctrl+K) to jump to a page, a route, a person or a notification.
 
 ### Kubernetes
 
