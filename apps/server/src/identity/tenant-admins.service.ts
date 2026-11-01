@@ -1,10 +1,11 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { DB, type Db, type DbOrTx } from "../db/db";
 import { auditLog, persons, tenantAdmins } from "../db/schema";
 
-export type AdminRoleAction = "admin.granted" | "admin.revoked";
+const ROLE_ACTIONS = ["admin.granted", "admin.revoked"] as const;
+export type AdminRoleAction = (typeof ROLE_ACTIONS)[number];
 
 /** Who changes a role: a person, or an org owner not linked to one yet. */
 export interface AdminActor {
@@ -70,6 +71,7 @@ export class TenantAdminsService {
     }
   }
 
+  /** Role changes only: the audit log also records other admin actions. */
   async audit(tenantId: string, limit = 50) {
     const actor = alias(persons, "actor");
     const subject = alias(persons, "subject");
@@ -87,7 +89,7 @@ export class TenantAdminsService {
       .from(auditLog)
       .leftJoin(actor, eq(actor.id, auditLog.actorPersonId))
       .leftJoin(subject, eq(subject.id, auditLog.subjectPersonId))
-      .where(eq(auditLog.tenantId, tenantId))
+      .where(and(eq(auditLog.tenantId, tenantId), inArray(auditLog.action, ROLE_ACTIONS)))
       .orderBy(desc(auditLog.createdAt))
       .limit(limit);
   }

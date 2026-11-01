@@ -23,7 +23,7 @@ export function AdminRoutes({ me }: { me: Me }) {
           </div>
         }
       />
-      <Route path="deliveries" element={<DeliveriesTab />} />
+      <Route path="deliveries/:id?" element={<DeliveriesTab />} />
       <Route path="people" element={<PeopleTab />} />
       <Route path="teams" element={<TeamsTab />} />
       <Route path="settings" element={<SettingsLayout />}>

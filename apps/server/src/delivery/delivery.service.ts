@@ -94,6 +94,7 @@ export class DeliveryService {
       .from(notifications)
       .where(eq(notifications.id, notificationId));
     if (!notification) return "failed";
+    // A retry (NotificationsService.retry) reopens a finished notification first.
     if (["delivered", "failed", "partially_failed"].includes(notification.status))
       return notification.status;
     if (attempt < maxAttempts && (await this.earlierInThreadPending(notification))) {
