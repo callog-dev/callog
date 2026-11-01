@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/confirm";
+import { actionsColumn, DataTable, type ColumnDef } from "@/components/data-table";
+import { EmptyState, ErrorState } from "@/components/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,15 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { adminApi, type Me } from "@/lib/api";
+import { adminApi, type AdminsInfo, type Me } from "@/lib/api";
 import { ago } from "@/lib/time";
 
 /** Who can open /manage: GitHub org owners (always) and people granted the role here. */
@@ -50,14 +45,31 @@ export function AdminsTab({ me }: { me: Me }) {
     },
     onError: (e) => toast.error(e.message),
   });
+  const confirm = useConfirm();
   const revoke = useMutation({
     mutationFn: adminApi.revokeAdmin,
     onSuccess: () => (toast.success("Admin role revoked"), void refresh()),
     onError: (e) => toast.error(e.message),
   });
 
+  const { mutate: revokeAdmin } = revoke;
+  const columns = useMemo(
+    () =>
+      adminColumns(me.person?.id, async (person) => {
+        const ok = await confirm({
+          title: `Revoke the admin role from ${person.name}?`,
+          action: "Revoke",
+          destructive: true,
+        });
+        if (ok) revokeAdmin(person.id);
+      }),
+    [me.person?.id, confirm, revokeAdmin],
+  );
+
   if (admins.isPending) return <Skeleton className="h-64 w-full" />;
-  if (admins.isError) return <p className="text-destructive">{admins.error.message}</p>;
+  if (admins.isError) {
+    return <ErrorState error={admins.error} retry={() => void admins.refetch()} />;
+  }
   const adminIds = new Set(admins.data.admins.map((a) => a.person.id));
   const candidates = (people.data ?? []).filter(
     (p) => p.status === "active" && !adminIds.has(p.id),
@@ -100,48 +112,17 @@ export function AdminsTab({ me }: { me: Me }) {
           </Button>
         </CardHeader>
         <CardContent>
-          {admins.data.admins.length ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Person</TableHead>
-                  <TableHead>Granted by</TableHead>
-                  <TableHead>When</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {admins.data.admins.map((a) => (
-                  <TableRow key={a.person.id}>
-                    <TableCell className="font-medium">
-                      {a.person.name}
-                      {a.person.id === me.person?.id && (
-                        <Badge variant="outline" className="ml-2">
-                          you
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{a.grantedBy ?? "—"}</TableCell>
-                    <TableCell className="text-muted-foreground">{ago(a.grantedAt)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive"
-                        onClick={() => revoke.mutate(a.person.id)}
-                      >
-                        Revoke
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="py-4 text-center text-sm text-muted-foreground">
-              Nobody besides the org owners yet.
-            </p>
-          )}
+          <DataTable
+            columns={columns}
+            data={admins.data.admins}
+            getRowId={(a) => a.person.id}
+            empty={
+              <EmptyState icon={ShieldCheck} title="Nobody besides the org owners yet">
+                Grant the role to people who should manage this workspace without owning the GitHub
+                org.
+              </EmptyState>
+            }
+          />
         </CardContent>
       </Card>
 
@@ -206,4 +187,52 @@ export function AdminsTab({ me }: { me: Me }) {
       </Dialog>
     </div>
   );
+}
+
+type Admin = AdminsInfo["admins"][number];
+
+function adminColumns(
+  myId: string | undefined,
+  revoke: (person: Admin["person"]) => void,
+): ColumnDef<Admin>[] {
+  return [
+    {
+      id: "person",
+      header: "Person",
+      accessorFn: (a) => a.person.name,
+      meta: { className: "font-medium" },
+      cell: ({ row: { original: a } }) => (
+        <>
+          {a.person.name}
+          {a.person.id === myId && (
+            <Badge variant="outline" className="ml-2">
+              you
+            </Badge>
+          )}
+        </>
+      ),
+    },
+    {
+      accessorKey: "grantedBy",
+      header: "Granted by",
+      meta: { className: "text-muted-foreground" },
+      cell: ({ row }) => row.original.grantedBy ?? "—",
+    },
+    {
+      accessorKey: "grantedAt",
+      header: "When",
+      meta: { className: "text-muted-foreground" },
+      cell: ({ row }) => ago(row.original.grantedAt),
+    },
+    actionsColumn((a) => (
+      <Button
+        size="sm"
+        variant="ghost"
+        className="text-destructive"
+        onClick={() => revoke(a.person)}
+      >
+        Revoke
+      </Button>
+    )),
+  ];
 }

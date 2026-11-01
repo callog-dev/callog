@@ -5,6 +5,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { App } from "./app";
+import { ConfirmProvider } from "./components/confirm";
 import { Toaster } from "./components/ui/sonner";
 import { ApiError } from "./lib/api";
 import { TooltipProvider } from "./components/ui/tooltip";
@@ -28,9 +29,11 @@ createRoot(document.getElementById("root")!).render(
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
+          <ConfirmProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </ConfirmProvider>
           <Toaster richColors />
         </TooltipProvider>
       </QueryClientProvider>

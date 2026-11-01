@@ -1,19 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link2, Users } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { actionsColumn, DataTable, type ColumnDef } from "@/components/data-table";
+import { PersonName } from "@/components/person-name";
 import { ProviderBadge } from "@/components/provider-badge";
+import { EmptyState, ErrorState } from "@/components/states";
 import { adminApi, type TeamInfo } from "@/lib/api";
 import { LinkDialog } from "./people";
 
@@ -25,12 +20,12 @@ export function TeamsTab() {
   const [linking, setLinking] = useState<string | null>(null);
 
   if (teams.isPending) return <Skeleton className="h-64 w-full" />;
-  if (teams.isError) return <p className="text-destructive">{teams.error.message}</p>;
+  if (teams.isError) return <ErrorState error={teams.error} retry={() => void teams.refetch()} />;
   if (teams.data.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No teams in <code>teams.yaml</code> of the active config.
-      </p>
+      <EmptyState icon={Users} title="No teams yet">
+        Teams come from <code>teams.yaml</code> in the config repo.
+      </EmptyState>
     );
   }
 
@@ -55,6 +50,7 @@ export function TeamsTab() {
 }
 
 function TeamCard({ team, onLink }: { team: TeamInfo; onLink: (ref: string) => void }) {
+  const columns = useMemo(() => memberColumns(onLink), [onLink]);
   const sources = [
     team.membersFrom?.githubTeam && `GitHub team ${team.membersFrom.githubTeam}`,
     team.membersFrom?.slackUsergroup && `Slack group @${team.membersFrom.slackUsergroup}`,
@@ -81,50 +77,48 @@ function TeamCard({ team, onLink }: { team: TeamInfo; onLink: (ref: string) => v
       <CardContent>
         {team.reason ? (
           <p className="text-sm text-muted-foreground">{team.reason}</p>
-        ) : team.members.length === 0 ? (
-          <p className="text-sm text-muted-foreground">The source has no members.</p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Account</TableHead>
-                <TableHead>Person</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {team.members.map((m) => (
-                <TableRow key={m.ref}>
-                  <TableCell>
-                    <ProviderBadge provider={m.provider}>{m.handle}</ProviderBadge>
-                  </TableCell>
-                  <TableCell>
-                    {m.person ? (
-                      <>
-                        {m.person.name}
-                        {m.person.status === "inactive" && (
-                          <Badge variant="outline" className="ml-2">
-                            inactive
-                          </Badge>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">not linked</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {!m.person && (
-                      <Button size="sm" variant="outline" onClick={() => onLink(m.ref)}>
-                        <Link2 /> Link
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <DataTable
+            columns={columns}
+            data={team.members}
+            getRowId={(m) => m.ref}
+            empty={<p className="text-sm text-muted-foreground">The source has no members.</p>}
+          />
         )}
       </CardContent>
     </Card>
   );
+}
+
+type Member = TeamInfo["members"][number];
+
+function memberColumns(link: (ref: string) => void): ColumnDef<Member>[] {
+  return [
+    {
+      accessorKey: "handle",
+      header: "Account",
+      cell: ({ row: { original: m } }) => (
+        <ProviderBadge provider={m.provider}>{m.handle}</ProviderBadge>
+      ),
+    },
+    {
+      id: "person",
+      header: "Person",
+      accessorFn: (m) => m.person?.name ?? "",
+      cell: ({ row: { original: m } }) =>
+        m.person ? (
+          <PersonName name={m.person.name} status={m.person.status} />
+        ) : (
+          <span className="text-muted-foreground">not linked</span>
+        ),
+    },
+    actionsColumn(
+      (m) =>
+        !m.person && (
+          <Button size="sm" variant="outline" onClick={() => link(m.ref)}>
+            <Link2 /> Link
+          </Button>
+        ),
+    ),
+  ];
 }

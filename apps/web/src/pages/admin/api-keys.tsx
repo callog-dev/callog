@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, KeyRound, Plus } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/confirm";
+import { actionsColumn, DataTable, type ColumnDef } from "@/components/data-table";
+import { EmptyState, ErrorState } from "@/components/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,15 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { adminApi } from "@/lib/api";
+import { adminApi, type ApiKeyInfo } from "@/lib/api";
 import { ago } from "@/lib/time";
 
 export function ApiKeysTab() {
@@ -41,6 +36,7 @@ export function ApiKeysTab() {
     },
     onError: (e) => toast.error(e.message),
   });
+  const confirm = useConfirm();
   const revoke = useMutation({
     mutationFn: adminApi.revokeApiKey,
     onSuccess: (_, n) => {
@@ -54,6 +50,21 @@ export function ApiKeysTab() {
     setCreated(null);
     setName("");
   };
+
+  const { mutate: revokeKey } = revoke;
+  const columns = useMemo(
+    () =>
+      apiKeyColumns(async (k) => {
+        const ok = await confirm({
+          title: `Revoke the key ${k.name}?`,
+          description: "Services using it stop being able to send notifications at once.",
+          action: "Revoke",
+          destructive: true,
+        });
+        if (ok) revokeKey(k.name);
+      }),
+    [confirm, revokeKey],
+  );
 
   return (
     <Card>
@@ -72,51 +83,20 @@ export function ApiKeysTab() {
       <CardContent>
         {keys.isPending ? (
           <Skeleton className="h-24" />
-        ) : keys.data?.length ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Key</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Last used</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {keys.data.map((k) => (
-                <TableRow key={k.id} className={k.revokedAt ? "opacity-50" : ""}>
-                  <TableCell className="font-medium">
-                    <KeyRound className="mr-1 inline size-3.5" />
-                    {k.name}
-                  </TableCell>
-                  <TableCell>
-                    <code>{k.prefix}…</code>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{ago(k.createdAt)}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {k.lastUsedAt ? ago(k.lastUsedAt) : "never"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {k.revokedAt ? (
-                      <Badge variant="outline">revoked</Badge>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive"
-                        onClick={() => revoke.mutate(k.name)}
-                      >
-                        Revoke
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        ) : keys.isError ? (
+          <ErrorState error={keys.error} retry={() => void keys.refetch()} />
         ) : (
-          <p className="py-4 text-center text-sm text-muted-foreground">No API keys yet.</p>
+          <DataTable
+            columns={columns}
+            data={keys.data}
+            getRowId={(k) => k.id}
+            rowClassName={(k) => (k.revokedAt ? "opacity-50" : undefined)}
+            empty={
+              <EmptyState icon={KeyRound} title="No API keys yet">
+                Services outside GitHub Actions send notifications with a key.
+              </EmptyState>
+            }
+          />
         )}
       </CardContent>
 
@@ -173,4 +153,46 @@ export function ApiKeysTab() {
       </Dialog>
     </Card>
   );
+}
+
+function apiKeyColumns(revoke: (key: ApiKeyInfo) => void): ColumnDef<ApiKeyInfo>[] {
+  return [
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: ({ row }) => (
+        <span className="font-medium">
+          <KeyRound className="mr-1 inline size-3.5" />
+          {row.original.name}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "prefix",
+      header: "Key",
+      enableSorting: false,
+      cell: ({ row }) => <code>{row.original.prefix}…</code>,
+    },
+    {
+      accessorKey: "createdAt",
+      header: "Created",
+      meta: { className: "text-muted-foreground" },
+      cell: ({ row }) => ago(row.original.createdAt),
+    },
+    {
+      accessorKey: "lastUsedAt",
+      header: "Last used",
+      meta: { className: "text-muted-foreground" },
+      cell: ({ row }) => (row.original.lastUsedAt ? ago(row.original.lastUsedAt) : "never"),
+    },
+    actionsColumn((k) =>
+      k.revokedAt ? (
+        <Badge variant="outline">revoked</Badge>
+      ) : (
+        <Button size="sm" variant="ghost" className="text-destructive" onClick={() => revoke(k)}>
+          Revoke
+        </Button>
+      ),
+    ),
+  ];
 }
