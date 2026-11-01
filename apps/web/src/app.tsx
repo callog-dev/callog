@@ -1,21 +1,12 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { BellRing, LogOut, Moon, Sun } from "lucide-react";
-import { useTheme } from "next-themes";
-import { NavLink, Navigate, Route, Routes } from "react-router";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { useQuery } from "@tanstack/react-query";
+import { Navigate, Route, Routes, useLocation } from "react-router";
+import { AppSidebar } from "@/components/app-sidebar";
+import { Separator } from "@/components/ui/separator";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError, type Me } from "@/lib/api";
-import { cn } from "@/lib/utils";
-import { AdminPage } from "@/pages/admin";
+import { navItemFor } from "@/lib/nav";
+import { AdminRoutes } from "@/pages/admin";
 import { LoginPage } from "@/pages/login";
 import { MePage } from "@/pages/me";
 import { RoutesPage } from "@/pages/routes";
@@ -38,87 +29,28 @@ export function App() {
 }
 
 function Shell({ me }: { me: Me }) {
-  const logout = useMutation({
-    mutationFn: api.logout,
-    onSuccess: () => window.location.assign("/"),
-  });
-  const { resolvedTheme, setTheme } = useTheme();
-  const name = me.person?.name ?? `@${me.githubLogin}`;
-  const initials = name
-    .replace(/^@/, "")
-    .split(/[\s-]+/)
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-  const link = ({ isActive }: { isActive: boolean }) =>
-    cn(
-      "rounded-md px-3 py-1.5 text-sm transition-colors",
-      isActive
-        ? "bg-muted font-medium text-foreground"
-        : "text-muted-foreground hover:text-foreground",
-    );
-
+  const current = navItemFor(useLocation().pathname, me.isAdmin);
   return (
-    <div className="min-h-svh bg-muted/40">
-      <header className="border-b bg-background">
-        <div className="mx-auto flex h-14 max-w-5xl items-center gap-4 px-4">
-          <div className="flex items-center gap-2 font-semibold">
-            <BellRing className="size-4" /> Callog
-            <span className="font-normal text-muted-foreground">/ {me.org}</span>
-          </div>
-          <nav className="flex gap-1">
-            <NavLink to="/routes" className={link}>
-              Routes
-            </NavLink>
-            <NavLink to="/me" className={link}>
-              Me
-            </NavLink>
-            {me.isAdmin && (
-              <NavLink to="/manage" className={link}>
-                Admin
-              </NavLink>
-            )}
-          </nav>
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Toggle theme"
-              onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-            >
-              {resolvedTheme === "dark" ? <Sun /> : <Moon />}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full" aria-label="Account">
-                  <Avatar className="size-8">
-                    <AvatarFallback>{initials}</AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>{name}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => logout.mutate()}>
-                  <LogOut /> Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+    <SidebarProvider>
+      <AppSidebar me={me} current={current} />
+      <SidebarInset>
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+          <h1 className="text-sm font-medium">{current?.title}</h1>
+        </header>
+        <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
+          <Routes>
+            <Route path="/routes" element={<RoutesPage linked={me.person !== null} />} />
+            <Route path="/me" element={<MePage me={me} />} />
+            {me.isAdmin && <Route path="/manage/*" element={<AdminRoutes me={me} />} />}
+            <Route
+              path="*"
+              element={<Navigate to={me.person || !me.isAdmin ? "/routes" : "/manage"} replace />}
+            />
+          </Routes>
         </div>
-      </header>
-      <main className="mx-auto max-w-5xl p-4 md:p-6">
-        <Routes>
-          <Route path="/routes" element={<RoutesPage linked={me.person !== null} />} />
-          <Route path="/me" element={<MePage me={me} />} />
-          {me.isAdmin && <Route path="/manage" element={<AdminPage me={me} />} />}
-          <Route
-            path="*"
-            element={<Navigate to={me.person || !me.isAdmin ? "/routes" : "/manage"} replace />}
-          />
-        </Routes>
-      </main>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
