@@ -48,6 +48,14 @@ export interface RouteSummary {
   url: string;
 }
 
+/** `GET /api/routes/:id`; the extra fields come only for admins. */
+export interface RouteDetails extends RouteSummary {
+  template?: unknown;
+  slackBlocks?: unknown;
+  examples?: { data?: Record<string, unknown>; recipients?: string[] }[];
+  schema?: unknown;
+}
+
 export interface RoutesResponse {
   configRepo: string;
   commitSha: string | null;
@@ -80,6 +88,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   me: () => request<Me>("GET", "/api/me"),
   routes: () => request<RoutesResponse>("GET", "/api/routes"),
+  route: (id: string) => request<RouteDetails>("GET", `/api/routes/${encodeURIComponent(id)}`),
   setDmChannel: (channel: DmChannel) =>
     request<Preferences>("PUT", "/api/me/preferences/dm", { channel }),
   mute: (routeId: string) =>
@@ -203,6 +212,23 @@ export interface AdminStatus {
   last24h: Partial<Record<NotificationStatus, number>>;
 }
 
+export interface ConfigVersionRow {
+  id: string;
+  commitSha: string;
+  status: "valid" | "invalid";
+  createdAt: string;
+  errors: number;
+  routes: number;
+  active: boolean;
+}
+
+export interface ConfigVersionDetails extends Omit<ConfigVersionRow, "errors" | "routes"> {
+  errors: ConfigIssue[];
+  warnings: ConfigIssue[];
+  routes: string[];
+  previousCommitSha: string | null;
+}
+
 export interface ConfigIssue {
   file: string;
   path: (string | number)[];
@@ -242,6 +268,13 @@ export const adminApi = {
   telegramTestMessage: (chatId: string) =>
     request<{ ok: true }>("POST", "/api/admin/telegram/test-message", { chatId }),
   status: () => request<AdminStatus>("GET", "/api/admin/status"),
+  configVersions: (before?: string) =>
+    request<{ items: ConfigVersionRow[]; nextBefore: string | null }>(
+      "GET",
+      `/api/admin/config/versions${before ? `?before=${encodeURIComponent(before)}` : ""}`,
+    ),
+  configVersion: (id: string) =>
+    request<ConfigVersionDetails>("GET", `/api/admin/config/versions/${id}`),
   reloadConfig: () =>
     request<{ status: string; reason?: string }>("POST", "/api/admin/config/reload"),
   notifications: (params: {

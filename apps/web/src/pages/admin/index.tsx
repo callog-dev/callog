@@ -3,6 +3,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Me } from "@/lib/api";
 import { AdminsTab } from "./admins";
 import { ApiKeysTab } from "./api-keys";
+import { ConfigPage } from "./config";
 import { DeliveriesTab } from "./deliveries";
 import { GettingStarted } from "./getting-started";
 import { IntegrationsPage } from "./integrations";
@@ -28,6 +29,7 @@ export function AdminRoutes({ me }: { me: Me }) {
       <Route path="people" element={<PeopleTab />} />
       <Route path="teams" element={<TeamsTab />} />
       <Route path="integrations" element={<IntegrationsPage />} />
+      <Route path="config/:versionId?" element={<ConfigPage />} />
       <Route path="settings" element={<SettingsLayout />}>
         <Route index element={<SettingsTab />} />
         <Route path="admins" element={<AdminsTab me={me} />} />

@@ -248,6 +248,24 @@ describe("web UI backend (integration)", () => {
       });
     });
 
+    it("/api/routes/:id shows the template and examples to admins only", async () => {
+      const admin = (await login({ id: 11, login: "alice-gh" })).cookie;
+      const engineer = (await login({ id: 12, login: "bob-gh" })).cookie;
+
+      const full = (await get("/api/routes/e2e", admin)).json();
+      expect(full).toMatchObject({
+        id: "e2e",
+        template: [{ text: "hi" }],
+        examples: [],
+        schema: { type: "object" },
+      });
+      const limited = (await get("/api/routes/e2e", engineer)).json();
+      expect(limited.id).toBe("e2e");
+      expect(limited).not.toHaveProperty("template");
+      expect(limited).not.toHaveProperty("examples");
+      expect((await get("/api/routes/nope", admin)).statusCode).toBe(404);
+    });
+
     it("/api/routes labels Telegram chats with their cached titles", async () => {
       const { cookie } = await login({ id: 11, login: "alice-gh" });
       const deploys = async () =>

@@ -26,9 +26,16 @@ const ACTION_REF = "callog-dev/callog/packages/action@v0.3.0";
 const POLL_MS = 1_000;
 const FINAL = new Set(["delivered", "partially_failed", "failed"]);
 
-export function TestNotificationDialog({ onClose }: { onClose: () => void }) {
+/** `route` preselects a route. */
+export function TestNotificationDialog({
+  route,
+  onClose,
+}: {
+  route?: string;
+  onClose: () => void;
+}) {
   const routes = useQuery({ queryKey: ["routes"], queryFn: api.routes });
-  const [routeId, setRouteId] = useState<string>();
+  const [routeId, setRouteId] = useState(route);
   const [sent, setSent] = useState<string>();
   const client = useQueryClient();
   const send = useMutation({

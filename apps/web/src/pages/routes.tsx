@@ -1,12 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, GitBranch, KeyRound, UserRound } from "lucide-react";
-import { toast } from "sonner";
-import { ProviderBadge } from "@/components/provider-badge";
+import { useQuery } from "@tanstack/react-query";
+import { GitBranch, UserRound } from "lucide-react";
+import { Link } from "react-router";
+import { MuteSwitch, RouteDestinations, RouteSources } from "@/components/route-parts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -15,24 +14,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { api, type RouteSummary } from "@/lib/api";
+import { api } from "@/lib/api";
 
 /** `linked`: personal copies belong to a person, so an unlinked owner cannot mute them. */
 export function RoutesPage({ linked }: { linked: boolean }) {
   const routes = useQuery({ queryKey: ["routes"], queryFn: api.routes });
-  const client = useQueryClient();
-  const toggle = useMutation({
-    mutationFn: (r: RouteSummary) => (r.muted ? api.unmute(r.id) : api.mute(r.id)),
-    onSuccess: (_, r) => {
-      toast.success(
-        r.muted ? `Personal copies of ${r.id} are back on` : `Muted personal copies of ${r.id}`,
-      );
-      void client.invalidateQueries({ queryKey: ["routes"] });
-      void client.invalidateQueries({ queryKey: ["me"] });
-    },
-    onError: (err) => toast.error(err.message),
-  });
 
   if (routes.isPending) return <Skeleton className="h-64 w-full" />;
   if (routes.isError) {
@@ -86,14 +72,12 @@ export function RoutesPage({ linked }: { linked: boolean }) {
               {routes.data.routes.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="align-top">
-                    <a
-                      href={r.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline"
+                    <Link
+                      to={`/routes/${encodeURIComponent(r.id)}`}
+                      className="font-medium underline-offset-4 hover:underline"
                     >
-                      {r.id} <ExternalLink className="size-3 text-muted-foreground" />
-                    </a>
+                      {r.id}
+                    </Link>
                     {r.description && (
                       <div className="text-sm text-muted-foreground">{r.description}</div>
                     )}
@@ -110,53 +94,18 @@ export function RoutesPage({ linked }: { linked: boolean }) {
                   </TableCell>
                   <TableCell className="align-top">
                     <div className="flex flex-wrap gap-1">
-                      {r.destinations.map((d) => (
-                        <ProviderBadge
-                          key={`${d.provider}${d.destination}`}
-                          provider={d.provider}
-                          title={d.label ? d.destination : undefined}
-                        >
-                          {d.label ?? d.destination}
-                        </ProviderBadge>
-                      ))}
+                      <RouteDestinations route={r} />
                       {r.dm && <Badge variant="outline">+ personal copies</Badge>}
                     </div>
                   </TableCell>
                   <TableCell className="align-top">
                     <div className="flex flex-col gap-1 text-sm">
-                      {r.allowedSources.github_repos.map((repo) => (
-                        <span key={repo} className="inline-flex items-center gap-1">
-                          <GitBranch className="size-3" />
-                          {repo}
-                        </span>
-                      ))}
-                      {r.allowedSources.api_keys.map((k) => (
-                        <span key={k} className="inline-flex items-center gap-1">
-                          <KeyRound className="size-3" />
-                          {k}
-                        </span>
-                      ))}
+                      <RouteSources route={r} />
                     </div>
                   </TableCell>
                   <TableCell className="text-right align-top">
                     {r.dm ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span>
-                            <Switch
-                              checked={!r.muted}
-                              disabled={!linked || toggle.isPending}
-                              onCheckedChange={() => toggle.mutate(r)}
-                              aria-label={`Personal copies of ${r.id}`}
-                            />
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {linked
-                            ? "Mentions in channels stay either way"
-                            : "Link your GitHub account to manage personal copies"}
-                        </TooltipContent>
-                      </Tooltip>
+                      <MuteSwitch route={r} linked={linked} />
                     ) : (
                       <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                         <UserRound className="size-3" />

@@ -14,7 +14,7 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
-import { ownValue } from "@callog/config-schema";
+import { ownValue, type Route } from "@callog/config-schema";
 import type { FastifyReply } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -24,7 +24,7 @@ import { identities, persons } from "../db/schema";
 import { routeTargets } from "../delivery/destinations";
 import { PreferencesService } from "../identity/preferences.service";
 import { TelegramChatTitles } from "../telegram/telegram-chat-titles";
-import { TenantConfigService } from "../tenant-config/tenant-config.service";
+import { TenantConfigService, type ActiveConfig } from "../tenant-config/tenant-config.service";
 import { configRepoOf, TenantsService } from "../tenants/tenants.service";
 import { AdminCheck } from "./admin-check";
 import { clearCookie, readCookie } from "./cookies";
@@ -90,41 +90,78 @@ export class ApiController {
   @UseGuards(SessionGuard)
   async routes(@Req() req: SessionRequest) {
     const { tenantId, personId } = req.session!;
+    const [tenant, active] = await Promise.all([
+      this.tenants.findById(tenantId),
+      this.configs.getActive(tenantId),
+    ]);
+    const { owner, repo } = configRepoOf(tenant!);
+    return {
+      configRepo: `${owner}/${repo}`,
+      commitSha: active?.commitSha ?? null,
+      routes: active
+        ? await this.summarize(tenantId, personId, active, Object.values(active.config.routes))
+        : [],
+    };
+  }
+
+  /** One route; admins also get what it renders and the examples it is tested with. */
+  @Get("routes/:routeId")
+  @UseGuards(SessionGuard)
+  async route(@Req() req: SessionRequest, @Param("routeId") routeId: string) {
+    const session = req.session!;
+    const active = await this.configs.getActive(session.tenantId);
+    const route = active && ownValue(active.config.routes, routeId);
+    if (!route) throw new NotFoundException(`Route "${routeId}" not found`);
+    const [[summary], isAdmin] = await Promise.all([
+      this.summarize(session.tenantId, session.personId, active, [route]),
+      this.adminCheck.isAdminSession(session),
+    ]);
+    if (!isAdmin) return summary;
+    return {
+      ...summary,
+      template: route.template ?? null,
+      slackBlocks: route.slack_blocks ?? null,
+      examples: route.examples,
+      schema: route.schema ?? null,
+    };
+  }
+
+  private async summarize(
+    tenantId: string,
+    personId: string | null,
+    active: ActiveConfig,
+    routes: Route[],
+  ) {
     const tenant = (await this.tenants.findById(tenantId))!;
-    const active = await this.configs.getActive(tenantId);
     const { owner, repo } = configRepoOf(tenant);
     const muted = new Set(personId ? (await this.preferences.get(personId)).mutedRoutes : []);
-    const routes = Object.values(active?.config.routes ?? {}).map((route) => ({
+    const withTargets = routes.map((route) => ({
       route,
-      targets: routeTargets(route, active!.config),
+      targets: routeTargets(route, active.config),
     }));
     // Telegram destinations are raw chat ids; show the chat title when the bot can see it.
     const titles = await this.chatTitles.titles(
       tenantId,
-      routes.flatMap(({ targets }) =>
+      withTargets.flatMap(({ targets }) =>
         targets.filter((t) => t.provider === "telegram").map((t) => t.destination),
       ),
     );
-    return {
-      configRepo: `${owner}/${repo}`,
-      commitSha: active?.commitSha ?? null,
-      routes: routes.map(({ route, targets }) => ({
-        id: route.id,
-        description: route.description ?? null,
-        destinations: targets.map((t) => {
-          const label = t.provider === "telegram" ? titles.get(t.destination) : undefined;
-          return label ? { ...t, label } : t;
-        }),
-        dm: route.dm,
-        mentions: route.mentions,
-        allowedSources: route.allowed_sources,
-        dataFields: Object.keys(
-          (route.schema?.properties as Record<string, unknown> | undefined) ?? {},
-        ),
-        muted: muted.has(route.id),
-        url: `https://github.com/${owner}/${repo}/blob/${active!.commitSha}/routes/${route.id}.yaml`,
-      })),
-    };
+    return withTargets.map(({ route, targets }) => ({
+      id: route.id,
+      description: route.description ?? null,
+      destinations: targets.map((t) => {
+        const label = t.provider === "telegram" ? titles.get(t.destination) : undefined;
+        return label ? { ...t, label } : t;
+      }),
+      dm: route.dm,
+      mentions: route.mentions,
+      allowedSources: route.allowed_sources,
+      dataFields: Object.keys(
+        (route.schema?.properties as Record<string, unknown> | undefined) ?? {},
+      ),
+      muted: muted.has(route.id),
+      url: `https://github.com/${owner}/${repo}/blob/${active.commitSha}/routes/${route.id}.yaml`,
+    }));
   }
 
   @Put("me/preferences/dm")

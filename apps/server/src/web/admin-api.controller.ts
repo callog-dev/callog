@@ -21,6 +21,7 @@ import { z } from "zod";
 import { parseBody } from "../admin/parse-body";
 import { DB, type Db } from "../db/db";
 import {
+  configVersions,
   deliveries,
   identities,
   notifications,
@@ -79,6 +80,7 @@ const notificationsQuery = z.object({
   period: z.enum(["24h", "7d", "30d"]).optional(),
   before: z.iso.datetime({ offset: true }).optional(),
 });
+const versionsQuery = z.object({ before: z.iso.datetime({ offset: true }).optional() });
 const apiKeyBody = z.object({ name: apiKeyNameSchema });
 const adminBody = z.object({ personId: z.uuid() });
 
@@ -617,6 +619,73 @@ export class AdminApiController {
         : null,
       telegram: telegram ? { bot: telegram.botUsername } : null,
       last24h: Object.fromEntries(counts.map((c) => [c.status, c.count])),
+    };
+  }
+
+  /** Every loaded push of the config repo, newest first; `before` pages backwards. */
+  @Get("config/versions")
+  async configVersionList(@Req() req: SessionRequest, @Query() query: unknown) {
+    const { tenantId } = req.session!;
+    const { before } = parseBody(versionsQuery, query);
+    const [rows, active] = await Promise.all([
+      this.db
+        .select({
+          id: configVersions.id,
+          commitSha: configVersions.commitSha,
+          status: configVersions.status,
+          createdAt: configVersions.createdAt,
+          errors: sql<number>`coalesce(jsonb_array_length(${configVersions.errors}->'errors'), 0)::int`,
+          routes: sql<number>`(select count(*) from jsonb_object_keys(coalesce(${configVersions.config}->'routes', '{}'::jsonb)))::int`,
+        })
+        .from(configVersions)
+        .where(
+          and(
+            eq(configVersions.tenantId, tenantId),
+            before ? lt(configVersions.createdAt, new Date(before)) : undefined,
+          ),
+        )
+        .orderBy(desc(configVersions.createdAt))
+        .limit(PAGE),
+      this.configs.getActive(tenantId),
+    ]);
+    return {
+      items: rows.map((r) => ({ ...r, active: r.id === active?.versionId })),
+      nextBefore: rows.length === PAGE ? rows.at(-1)!.createdAt.toISOString() : null,
+    };
+  }
+
+  /** A version's problems, and the push before it for a GitHub compare link. */
+  @Get("config/versions/:id")
+  async configVersion(@Req() req: SessionRequest, @Param("id", ParseUUIDPipe) id: string) {
+    const { tenantId } = req.session!;
+    const [[version], active] = await Promise.all([
+      this.db
+        .select({
+          id: configVersions.id,
+          commitSha: configVersions.commitSha,
+          status: configVersions.status,
+          createdAt: configVersions.createdAt,
+          errors: configVersions.errors,
+          routes: sql<
+            string[]
+          >`coalesce((select array_agg(k) from jsonb_object_keys(${configVersions.config}->'routes') k), '{}')`,
+          previousCommitSha: sql<string | null>`(
+            select p.commit_sha from config_versions p
+            where p.tenant_id = config_versions.tenant_id
+              and p.created_at < config_versions.created_at
+            order by p.created_at desc limit 1)`,
+        })
+        .from(configVersions)
+        .where(and(eq(configVersions.tenantId, tenantId), eq(configVersions.id, id))),
+      this.configs.getActive(tenantId),
+    ]);
+    if (!version) throw new NotFoundException();
+    const issues = (version.errors ?? {}) as { errors?: ConfigIssue[]; warnings?: ConfigIssue[] };
+    return {
+      ...version,
+      errors: issues.errors ?? [],
+      warnings: issues.warnings ?? [],
+      active: version.id === active?.versionId,
     };
   }
 

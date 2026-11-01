@@ -9,6 +9,7 @@ import { navItemFor } from "@/lib/nav";
 import { AdminRoutes } from "@/pages/admin";
 import { LoginPage } from "@/pages/login";
 import { MePage } from "@/pages/me";
+import { RoutePage } from "@/pages/route";
 import { RoutesPage } from "@/pages/routes";
 
 export function App() {
@@ -42,6 +43,10 @@ function Shell({ me }: { me: Me }) {
         <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
           <Routes>
             <Route path="/routes" element={<RoutesPage linked={me.person !== null} />} />
+            <Route
+              path="/routes/:routeId"
+              element={<RoutePage linked={me.person !== null} admin={me.isAdmin} />}
+            />
             <Route path="/me" element={<MePage me={me} />} />
             {me.isAdmin && <Route path="/manage/*" element={<AdminRoutes me={me} />} />}
             <Route
