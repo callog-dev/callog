@@ -27,6 +27,22 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TEAM_CACHE_MS = 60_000;
 const MAX_TEAM_CACHE = 1_000;
 
+/**
+ * The refs that resolve to a person: `person:<id>`, GitHub by login, the other accounts by id
+ * (the inverse of the lookup below). Lowercase, to match `recipients` case-insensitively.
+ */
+export function refsNaming(
+  personId: string,
+  accounts: { provider: Provider; externalId: string; handle: string | null }[],
+): string[] {
+  return [
+    `person:${personId}`,
+    ...accounts.map((a) =>
+      a.provider === "github" ? `github:${a.handle}` : `${a.provider}:${a.externalId}`,
+    ),
+  ].map((ref) => ref.toLowerCase());
+}
+
 export interface ResolvedPerson {
   personId: string;
   displayName: string;

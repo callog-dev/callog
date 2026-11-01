@@ -140,6 +140,28 @@ export interface AdminPerson {
   identities: (Identity & { id: string })[];
 }
 
+export interface PersonOption {
+  id: string;
+  name: string;
+}
+
+export type AdminIdentity = AdminPerson["identities"][number];
+
+export interface SuggestedLink extends AdminIdentity {
+  person: PersonOption;
+}
+
+export interface PersonDetails extends AdminPerson {
+  admin: boolean;
+  preferences: Preferences;
+  recentNotifications: {
+    id: string;
+    route: string;
+    status: NotificationStatus;
+    createdAt: string;
+  }[];
+}
+
 export interface UnmappedRow {
   ref: string;
   provider: "slack" | "telegram";
@@ -301,7 +323,16 @@ export const adminApi = {
     request<NotificationDetails>("GET", `/api/admin/notifications/${id}`),
   retryNotification: (id: string) =>
     request<{ status: "accepted" }>("POST", `/api/admin/notifications/${id}/retry`),
-  people: () => request<AdminPerson[]>("GET", "/api/admin/people"),
+  people: (params: { q: string; status: string; page: string }) => {
+    const q = new URLSearchParams(params);
+    return request<{ items: AdminPerson[]; total: number; pageSize: number }>(
+      "GET",
+      `/api/admin/people?${q}`,
+    );
+  },
+  peopleOptions: () => request<PersonOption[]>("GET", "/api/admin/people/options"),
+  person: (id: string) => request<PersonDetails>("GET", `/api/admin/people/${id}`),
+  suggestedLinks: () => request<SuggestedLink[]>("GET", "/api/admin/identities/suggested"),
   unmapped: () => request<UnmappedRow[]>("GET", "/api/admin/unmapped"),
   confirmIdentity: (id: string) => request<void>("POST", `/api/admin/identities/${id}/confirm`),
   unlinkIdentity: (id: string) => request<void>("DELETE", `/api/admin/identities/${id}`),

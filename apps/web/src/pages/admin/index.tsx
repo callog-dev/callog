@@ -1,5 +1,5 @@
-import { Link, Navigate, Outlet, Route, Routes, useLocation } from "react-router";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Navigate, Route, Routes } from "react-router";
+import { RouteTabs } from "@/components/route-tabs";
 import type { Me } from "@/lib/api";
 import { AdminsTab } from "./admins";
 import { ApiKeysTab } from "./api-keys";
@@ -8,7 +8,7 @@ import { DeliveriesTab } from "./deliveries";
 import { GettingStarted } from "./getting-started";
 import { IntegrationsPage } from "./integrations";
 import { OverviewTab } from "./overview";
-import { PeopleTab } from "./people";
+import { PeoplePage } from "./people";
 import { SettingsTab } from "./settings";
 import { TeamsTab } from "./teams";
 
@@ -26,11 +26,11 @@ export function AdminRoutes({ me }: { me: Me }) {
         }
       />
       <Route path="deliveries/:id?" element={<DeliveriesTab />} />
-      <Route path="people" element={<PeopleTab />} />
+      <Route path="people/*" element={<PeoplePage />} />
       <Route path="teams" element={<TeamsTab />} />
       <Route path="integrations" element={<IntegrationsPage />} />
       <Route path="config/:versionId?" element={<ConfigPage />} />
-      <Route path="settings" element={<SettingsLayout />}>
+      <Route path="settings" element={<RouteTabs tabs={SETTINGS} />}>
         <Route index element={<SettingsTab />} />
         <Route path="admins" element={<AdminsTab me={me} />} />
         <Route path="api-keys" element={<ApiKeysTab />} />
@@ -45,21 +45,3 @@ const SETTINGS = [
   { title: "Admins", url: "/manage/settings/admins" },
   { title: "API keys", url: "/manage/settings/api-keys" },
 ];
-
-function SettingsLayout() {
-  const { pathname } = useLocation();
-  return (
-    <div className="space-y-4">
-      <Tabs value={pathname}>
-        <TabsList variant="line">
-          {SETTINGS.map((item) => (
-            <TabsTrigger key={item.url} value={item.url} asChild>
-              <Link to={item.url}>{item.title}</Link>
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
-      <Outlet />
-    </div>
-  );
-}
