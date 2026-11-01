@@ -63,8 +63,8 @@ export function RoutesPage({ linked }: { linked: boolean }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Route</TableHead>
-                <TableHead>Delivers to</TableHead>
-                <TableHead>Who can send</TableHead>
+                <TableHead className="hidden md:table-cell">Delivers to</TableHead>
+                <TableHead className="hidden md:table-cell">Who can send</TableHead>
                 <TableHead className="text-right">My copies</TableHead>
               </TableRow>
             </TableHeader>
@@ -92,13 +92,13 @@ export function RoutesPage({ linked }: { linked: boolean }) {
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="align-top">
+                  <TableCell className="hidden align-top md:table-cell">
                     <div className="flex flex-wrap gap-1">
                       <RouteDestinations route={r} />
                       {r.dm && <Badge variant="outline">+ personal copies</Badge>}
                     </div>
                   </TableCell>
-                  <TableCell className="align-top">
+                  <TableCell className="hidden align-top md:table-cell">
                     <div className="flex flex-col gap-1 text-sm">
                       <RouteSources route={r} />
                     </div>

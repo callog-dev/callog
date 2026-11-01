@@ -1,16 +1,24 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BadgeCheck, CircleDashed, ShieldCheck } from "lucide-react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { ProviderBadge } from "@/components/provider-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { api, type DmChannel, type Identity, type LinkedMe, type Me } from "@/lib/api";
+import { useMuteToggle } from "@/lib/mutes";
 
 const display = (i: Identity) =>
   i.provider === "telegram" && i.handle ? `@${i.handle}` : (i.handle ?? i.externalId);
+
+const LINK_HINTS = {
+  github: "Link GitHub so workflows can mention you.",
+  telegram: "Link Telegram to get personal copies there and be mentioned in Telegram groups.",
+};
 
 export function MePage({ me }: { me: Me }) {
   return me.person ? <PersonPage me={me} /> : <UnlinkedPage me={me} />;
@@ -93,14 +101,15 @@ function PersonPage({ me }: { me: LinkedMe }) {
           {missing.length > 0 && (
             <>
               <Separator />
-              <p className="text-sm text-muted-foreground">
-                Link more in Slack:{" "}
+              <ul className="space-y-2 text-sm text-muted-foreground">
                 {missing.map((p) => (
-                  <code key={p} className="mr-1 rounded bg-muted px-1">
-                    /notify link {p}
-                  </code>
+                  <li key={p}>
+                    {LINK_HINTS[p]} Run{" "}
+                    <code className="rounded bg-muted px-1 text-foreground">/notify link {p}</code>{" "}
+                    in Slack.
+                  </li>
                 ))}
-              </p>
+              </ul>
             </>
           )}
         </CardContent>
@@ -110,8 +119,8 @@ function PersonPage({ me }: { me: LinkedMe }) {
         <CardHeader>
           <CardTitle>Personal copies</CardTitle>
           <CardDescription>
-            Routes with personal copies also message you directly. Choose where they arrive; mute
-            single routes on the Routes page.
+            Routes with personal copies also message you directly. Choose where they arrive and
+            which routes stay quiet.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -132,18 +141,48 @@ function PersonPage({ me }: { me: LinkedMe }) {
             </div>
           </RadioGroup>
           <Separator />
-          <div className="text-sm">
-            <span className="text-muted-foreground">Muted: </span>
-            {me.preferences.mutedRoutes.length === 0
-              ? "nothing"
-              : me.preferences.mutedRoutes.map((r) => (
-                  <code key={r} className="mr-1 rounded bg-muted px-1">
-                    {r}
-                  </code>
-                ))}
-          </div>
+          <MutedRoutes routes={me.preferences.mutedRoutes} />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function MutedRoutes({ routes }: { routes: string[] }) {
+  const toggle = useMuteToggle();
+  if (routes.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No route is muted. Mute one on its page under{" "}
+        <Link to="/routes" className="underline underline-offset-4">
+          Routes
+        </Link>
+        .
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-2 text-sm">
+      <div className="text-muted-foreground">Muted routes</div>
+      <ul className="divide-y rounded-md border">
+        {routes.map((routeId) => (
+          <li key={routeId} className="flex items-center justify-between gap-2 px-3 py-2">
+            <Link
+              to={`/routes/${encodeURIComponent(routeId)}`}
+              className="truncate font-medium underline-offset-4 hover:underline"
+            >
+              {routeId}
+            </Link>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => toggle.mutate({ routeId, muted: false })}
+            >
+              Unmute
+            </Button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
