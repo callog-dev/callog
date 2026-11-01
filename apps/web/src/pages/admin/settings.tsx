@@ -5,12 +5,14 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/states";
 import { adminApi } from "@/lib/api";
 
 export function SettingsTab() {
   const status = useQuery({ queryKey: ["admin", "status"], queryFn: adminApi.status });
   if (status.isPending) return <Skeleton className="h-40 w-full" />;
-  if (status.isError) return <p className="text-destructive">{status.error.message}</p>;
+  if (status.isError)
+    return <ErrorState error={status.error} retry={() => void status.refetch()} />;
   const s = status.data;
   const link = (href: string, text: string) => (
     <a className="underline-offset-4 hover:underline" href={href} target="_blank" rel="noreferrer">

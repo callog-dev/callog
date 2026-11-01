@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/states";
 import { adminApi } from "@/lib/api";
 import { ago } from "@/lib/time";
 import { SlackConnectDialog, TelegramConnectDialog } from "./connect-channels";
@@ -28,7 +29,8 @@ export function OverviewTab() {
   const [dialog, setDialog] = useState<"slack" | "telegram">();
 
   if (status.isPending) return <Skeleton className="h-48 w-full" />;
-  if (status.isError) return <p className="text-destructive">{status.error.message}</p>;
+  if (status.isError)
+    return <ErrorState error={status.error} retry={() => void status.refetch()} />;
   const s = status.data;
   const latest = s.config.latest;
   const errors = latest?.status === "invalid" ? (latest.issues?.errors ?? []) : [];

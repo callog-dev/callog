@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Link2, X } from "lucide-react";
-import { useState } from "react";
+import { Check, CheckCircle2, Link2, Users, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/confirm";
+import { actionsColumn, DataTable, useUrlTableView, type ColumnDef } from "@/components/data-table";
+import { PersonName } from "@/components/person-name";
 import { ProviderBadge } from "@/components/provider-badge";
-import { Badge } from "@/components/ui/badge";
+import { EmptyState, ErrorState } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -24,15 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { adminApi, type AdminPerson } from "@/lib/api";
+import { adminApi, type AdminPerson, type UnmappedRow } from "@/lib/api";
 import { ago } from "@/lib/time";
 
 export function PeopleTab() {
@@ -44,7 +39,7 @@ export function PeopleTab() {
     void client.invalidateQueries({ queryKey: ["admin", "people"] });
     void client.invalidateQueries({ queryKey: ["admin", "unmapped"] });
   };
-  const confirm = useMutation({
+  const confirmLink = useMutation({
     mutationFn: adminApi.confirmIdentity,
     onSuccess: () => (toast.success("Confirmed"), refresh()),
     onError: (e) => toast.error(e.message),
@@ -55,8 +50,32 @@ export function PeopleTab() {
     onError: (e) => toast.error(e.message),
   });
 
+  const confirm = useConfirm();
+  const { mutate: unlinkIdentity } = unlink;
+  const view = useUrlTableView();
+  const columns = useMemo(
+    () => ({
+      unmapped: unmappedColumns((ref) => setLinking({ ref })),
+      people: peopleColumns(async (identity, person) => {
+        const ok = await confirm({
+          title: `Unlink ${identity.handle ?? identity.externalId} from ${person.name}?`,
+          description: "Notifications stop mentioning them through this account.",
+          action: "Unlink",
+          destructive: true,
+        });
+        if (ok) unlinkIdentity(identity.id);
+      }),
+    }),
+    [confirm, unlinkIdentity],
+  );
+
   if (people.isPending || unmapped.isPending) return <Skeleton className="h-64 w-full" />;
-  if (people.isError) return <p className="text-destructive">{people.error.message}</p>;
+  if (people.isError) {
+    return <ErrorState error={people.error} retry={() => void people.refetch()} />;
+  }
+  if (unmapped.isError) {
+    return <ErrorState error={unmapped.error} retry={() => void unmapped.refetch()} />;
+  }
   const suggested = people.data.flatMap((p) =>
     p.identities
       .filter((i) => i.confidence === "suggested")
@@ -83,7 +102,11 @@ export function PeopleTab() {
                   → <b>{person.name}</b>
                 </span>
                 <span className="flex gap-1">
-                  <Button size="sm" variant="outline" onClick={() => confirm.mutate(identity.id)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => confirmLink.mutate(identity.id)}
+                  >
                     <Check /> Confirm
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => unlink.mutate(identity.id)}>
@@ -104,52 +127,12 @@ export function PeopleTab() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {unmapped.data?.length ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Recipient</TableHead>
-                  <TableHead>In</TableHead>
-                  <TableHead>Times</TableHead>
-                  <TableHead>Last seen</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {unmapped.data.map((u) => (
-                  <TableRow key={`${u.ref}${u.provider}`}>
-                    <TableCell>
-                      <code>{u.ref}</code>
-                      {u.reason && <div className="text-xs text-muted-foreground">{u.reason}</div>}
-                    </TableCell>
-                    <TableCell>
-                      <ProviderBadge provider={u.provider} />
-                    </TableCell>
-                    <TableCell>{u.occurrences}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {ago(u.lastSeenAt)}
-                      {u.lastRoute ? ` · ${u.lastRoute}` : ""}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {/^(github|email|slack|telegram):/.test(u.ref) && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setLinking({ ref: u.ref })}
-                        >
-                          <Link2 /> Link
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="py-4 text-center text-sm text-muted-foreground">
-              Everyone mentioned recently is linked. 🎉
-            </p>
-          )}
+          <DataTable
+            columns={columns.unmapped}
+            data={unmapped.data}
+            getRowId={(u) => `${u.ref}${u.provider}`}
+            empty={<EmptyState icon={CheckCircle2} title="Everyone mentioned recently is linked" />}
+          />
         </CardContent>
       </Card>
 
@@ -166,45 +149,18 @@ export function PeopleTab() {
           </Button>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableBody>
-              {people.data.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell className="w-48 align-top font-medium">
-                    {p.name}
-                    {p.status === "inactive" && (
-                      <Badge variant="outline" className="ml-2">
-                        inactive
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {p.identities.map((i) => (
-                        <span
-                          key={i.id}
-                          className="group inline-flex items-center"
-                          title={`${i.confidence} via ${i.source}`}
-                        >
-                          <ProviderBadge provider={i.provider}>
-                            {i.handle ?? i.externalId}
-                            {i.confidence === "suggested" ? " ?" : ""}
-                          </ProviderBadge>
-                          <button
-                            className="ml-0.5 hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:inline"
-                            aria-label={`Unlink ${i.provider}`}
-                            onClick={() => unlink.mutate(i.id)}
-                          >
-                            <X className="size-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <DataTable
+            columns={columns.people}
+            data={people.data}
+            getRowId={(p) => p.id}
+            search="Search by name or account"
+            view={view}
+            empty={
+              <EmptyState icon={Users} title="Nobody here yet">
+                People are imported from Slack once it is connected.
+              </EmptyState>
+            }
+          />
         </CardContent>
       </Card>
 
@@ -218,6 +174,87 @@ export function PeopleTab() {
       )}
     </div>
   );
+}
+
+const LINKABLE = /^(github|email|slack|telegram):/;
+
+function unmappedColumns(link: (ref: string) => void): ColumnDef<UnmappedRow>[] {
+  return [
+    {
+      accessorKey: "ref",
+      header: "Recipient",
+      cell: ({ row: { original: u } }) => (
+        <>
+          <code>{u.ref}</code>
+          {u.reason && <div className="text-xs text-muted-foreground">{u.reason}</div>}
+        </>
+      ),
+    },
+    {
+      accessorKey: "provider",
+      header: "In",
+      cell: ({ row }) => <ProviderBadge provider={row.original.provider} />,
+    },
+    { accessorKey: "occurrences", header: "Times" },
+    {
+      accessorKey: "lastSeenAt",
+      header: "Last seen",
+      meta: { className: "text-muted-foreground" },
+      cell: ({ row: { original: u } }) =>
+        `${ago(u.lastSeenAt)}${u.lastRoute ? ` · ${u.lastRoute}` : ""}`,
+    },
+    actionsColumn(
+      (u) =>
+        LINKABLE.test(u.ref) && (
+          <Button size="sm" variant="outline" onClick={() => link(u.ref)}>
+            <Link2 /> Link
+          </Button>
+        ),
+    ),
+  ];
+}
+
+function peopleColumns(
+  unlink: (identity: AdminPerson["identities"][number], person: AdminPerson) => void,
+): ColumnDef<AdminPerson>[] {
+  return [
+    {
+      accessorKey: "name",
+      header: "Name",
+      meta: { className: "w-48 align-top font-medium" },
+      cell: ({ row: { original: p } }) => <PersonName name={p.name} status={p.status} />,
+    },
+    {
+      id: "accounts",
+      header: "Accounts",
+      enableSorting: false,
+      // What the search box matches on.
+      accessorFn: (p) => p.identities.map((i) => i.handle ?? i.externalId).join(" "),
+      cell: ({ row: { original: p } }) => (
+        <div className="flex flex-wrap gap-1">
+          {p.identities.map((i) => (
+            <span
+              key={i.id}
+              className="group inline-flex items-center"
+              title={`${i.confidence} via ${i.source}`}
+            >
+              <ProviderBadge provider={i.provider}>
+                {i.handle ?? i.externalId}
+                {i.confidence === "suggested" ? " ?" : ""}
+              </ProviderBadge>
+              <button
+                className="ml-0.5 rounded p-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100"
+                aria-label={`Unlink ${i.provider}`}
+                onClick={() => unlink(i, p)}
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      ),
+    },
+  ];
 }
 
 export function LinkDialog({
