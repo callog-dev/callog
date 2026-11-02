@@ -3,8 +3,8 @@ name: callog
 description: Git-first routing for engineering notifications (GitHub, Slack, Telegram)
 type: application
 # Released together with the app: version = appVersion = the release.
-version: 0.3.0
-appVersion: "0.3.0"
+version: 0.4.0
+appVersion: "0.4.0"
 kubeVersion: ">=1.27-0"
 home: https://github.com/callog-dev/callog
 sources:

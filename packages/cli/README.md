@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: callog-dev/callog/packages/cli@v0.3.0
+      - uses: callog-dev/callog/packages/cli@v0.4.0
         with:
           path: . # config directory, default "."
 ```

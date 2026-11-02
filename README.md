@@ -17,7 +17,7 @@ database, TLS, poolers, scripted setup and registering the App by hand, see
 ### 1. Get the files
 
 ```bash
-git clone --branch v0.3.0 --depth 1 https://github.com/callog-dev/callog && cd callog
+git clone --branch v0.4.0 --depth 1 https://github.com/callog-dev/callog && cd callog
 cp .env.example .env
 ```
 
@@ -28,7 +28,7 @@ Set three lines in `.env` and leave the rest empty:
 ```bash
 PUBLIC_URL=https://callog.acme.dev            # the address people will open; http://localhost:3000 to try it
 ENCRYPTION_KEY=...                            # openssl rand -base64 32 — keep it with your database backups
-CALLOG_IMAGE=ghcr.io/callog-dev/callog:0.3.0  # empty = build from source
+CALLOG_IMAGE=ghcr.io/callog-dev/callog:0.4.0  # empty = build from source
 ```
 
 ### 3. Start
