@@ -7,7 +7,7 @@ import {
   type Route,
 } from "@callog/config-schema";
 import { TemplateRenderError } from "@callog/templates";
-import { and, asc, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, lt, max, ne, sql } from "drizzle-orm";
 import { MessageGoneError, type Channel, type ChannelId } from "../channels/channel";
 import { ChannelRegistry } from "../channels/channel-registry";
 import { DB, type Db } from "../db/db";
@@ -261,13 +261,35 @@ export class DeliveryService {
     );
     try {
       const input = { data: notification.data, recipients };
-      return { channel, message: channel.render(route, input, resolution.mention) };
+      const shown = await this.withRepeats(route, notification);
+      return { channel, message: channel.render(shown, input, resolution.mention) };
     } catch (err) {
       if (err instanceof TemplateRenderError) {
         return new PermanentFailure(`Template error at ${err.message}`);
       }
       throw err;
     }
+  }
+
+  /**
+   * A repeat of a grouped notification edits the group's first message; a footer says how
+   * often it repeated. Counted now, so a retry of an older repeat does not count backwards.
+   */
+  private async withRepeats(route: Route, notification: Notification): Promise<Route> {
+    if (!notification.groupKey || !notification.threadKey) return route;
+    const [group] = await this.db
+      .select({ count: count(), lastAt: max(notifications.createdAt) })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.tenantId, notification.tenantId),
+          eq(notifications.threadKey, notification.threadKey),
+        ),
+      );
+    if (!group?.lastAt || group.count < 2) return route;
+    const time = group.lastAt.toISOString().slice(11, 16);
+    const context = `Repeated ${group.count} times, last at ${time} UTC`;
+    return { ...route, template: [...route.template, { context }] };
   }
 
   /**

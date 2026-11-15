@@ -171,6 +171,8 @@ export const notifications = pgTable(
       .default(sql`'{}'::text[]`),
     threadKey: text("thread_key"),
     update: boolean("update").notNull().default(false),
+    /** What the route's `group.key` rendered to; repeats within the window share a thread. */
+    groupKey: text("group_key"),
     status: text("status", {
       enum: ["accepted", "processing", "delivered", "partially_failed", "failed"],
     })
@@ -182,6 +184,7 @@ export const notifications = pgTable(
   (t) => [
     index("notifications_tenant_created_idx").on(t.tenantId, t.createdAt),
     index("notifications_tenant_thread_idx").on(t.tenantId, t.threadKey),
+    index("notifications_group_idx").on(t.tenantId, t.routeId, t.groupKey, t.createdAt),
   ],
 );
 

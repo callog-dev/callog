@@ -27,6 +27,8 @@ export function parseNotifyRequest(body: unknown): NotifyRequest {
   });
 }
 export const MAX_RECIPIENTS = 50;
+/** Threads the server opens for a route's `group`; senders cannot name one. */
+export const GROUP_THREAD_PREFIX = "group:";
 
 /** Body of `POST /v1/notify`. */
 export const notifyRequestSchema = z
@@ -35,7 +37,14 @@ export const notifyRequestSchema = z
     data: z.record(z.string(), z.unknown()).default({}),
     /** People and teams to mention, and places (`place:<name>`) to post to. */
     recipients: z.array(recipientSchema).max(MAX_RECIPIENTS).default([]),
-    thread_key: z.string().min(1).max(200).optional(),
+    thread_key: z
+      .string()
+      .min(1)
+      .max(200)
+      .refine((key) => !key.startsWith(GROUP_THREAD_PREFIX), {
+        message: `must not start with "${GROUP_THREAD_PREFIX}"`,
+      })
+      .optional(),
     /** Edit the thread's first message instead of posting a new one. */
     update: z.boolean().default(false),
   })

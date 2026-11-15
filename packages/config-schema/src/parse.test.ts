@@ -229,6 +229,18 @@ recipients: ["githb:octocat", "place:nowhere", "github:{{ data.x }}", "team:sre"
     });
   });
 
+  it("reads the grouping window as seconds", () => {
+    const parse = (window: string) =>
+      parseConfigTree({
+        "routes/a.yaml": minimalRoute("a", `group: { key: "{{ data.alert }}", window: ${window} }`),
+      });
+    const result = parse("15m");
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    expect(result.config.routes.a!.group).toEqual({ key: "{{ data.alert }}", window: 900 });
+    expect(errorsOf(parse("soon"))[0]?.message).toBe("must be a duration like 90s, 15m or 2h");
+    expect(errorsOf(parse("25h"))[0]?.message).toBe("must be at most 24h");
+  });
+
   it("rejects raw Slack blocks", () => {
     const errors = errorsOf(
       parseConfigTree({

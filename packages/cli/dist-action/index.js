@@ -37913,6 +37913,9 @@ var require_schemas3 = __commonJS({
         actions: zod_1.z.array(zod_1.z.strictObject({ text: zod_1.z.string().min(1), url: zod_1.z.string().min(1) })).min(1)
       })
     ]);
+    var WINDOW_UNITS = { s: 1, m: 60, h: 3600 };
+    var MAX_WINDOW_SECONDS = 24 * 3600;
+    var windowSchema = zod_1.z.string().regex(/^[1-9]\d*[smh]$/, "must be a duration like 90s, 15m or 2h").transform((v) => Number(v.slice(0, -1)) * WINDOW_UNITS[v.slice(-1)]).refine((seconds) => seconds <= MAX_WINDOW_SECONDS, { message: "must be at most 24h" });
     exports2.destinationSchema = zod_1.z.union([
       ...exports2.placeSchema.options,
       zod_1.z.strictObject({ place: refs_1.slugSchema }),
@@ -37940,6 +37943,12 @@ var require_schemas3 = __commonJS({
        * separated by spaces or commas; anything that is not a recipient is left out.
        */
       recipients: zod_1.z.array(zod_1.z.string().min(1)).default([]),
+      /**
+       * Repeats of the same thing — an alert that keeps firing — update one message instead
+       * of posting again. `key` is a Liquid template over `data` saying what "the same" is;
+       * a group stays open for `window` after its first notification.
+       */
+      group: zod_1.z.strictObject({ key: zod_1.z.string().min(1), window: windowSchema }).optional(),
       mentions: zod_1.z.enum(["recipients", "none"]).default("recipients"),
       /**
        * Also send each recipient a personal copy in their preferred channel (Slack or
@@ -43499,12 +43508,20 @@ var require_recipients = __commonJS({
   "../templates/dist/recipients.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.renderGroupKey = renderGroupKey;
     exports2.renderRouteRecipients = renderRouteRecipients;
     var config_schema_1 = require_dist3();
     var engine_1 = require_engine();
+    function renderGroupKey(route, data) {
+      const { group } = route;
+      if (!group)
+        return void 0;
+      const key = (0, engine_1.renderAt)(["group", "key"], () => (0, engine_1.renderString)((0, engine_1.createPlainEngine)(), group.key, dataContext(route, data))).trim();
+      return key || void 0;
+    }
     function renderRouteRecipients(route, data) {
       const engine = (0, engine_1.createPlainEngine)();
-      const ctx = { data, recipients: [], route: { id: route.id } };
+      const ctx = dataContext(route, data);
       const found = /* @__PURE__ */ new Set();
       route.recipients.forEach((source, i) => {
         const rendered = (0, engine_1.renderAt)(["recipients", i], () => (0, engine_1.renderString)(engine, source, ctx));
@@ -43515,6 +43532,9 @@ var require_recipients = __commonJS({
         }
       });
       return [...found];
+    }
+    function dataContext(route, data) {
+      return { data, recipients: [], route: { id: route.id } };
     }
   }
 });
@@ -43537,6 +43557,7 @@ var require_validate2 = __commonJS({
       inputs.forEach((input, i) => {
         try {
           (0, recipients_1.renderRouteRecipients)(route, input.data);
+          (0, recipients_1.renderGroupKey)(route, input.data);
           (0, slack_1.renderSlack)(route, input);
           (0, telegram_1.renderTelegram)(route, input);
         } catch (err) {
@@ -43568,7 +43589,7 @@ var require_dist4 = __commonJS({
   "../templates/dist/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.validateRouteTemplates = exports2.validateConfigTree = exports2.renderRouteRecipients = exports2.renderTelegram = exports2.escapeTelegram = exports2.renderSlack = exports2.escapeSlack = exports2.TemplateRenderError = exports2.SafeString = void 0;
+    exports2.validateRouteTemplates = exports2.validateConfigTree = exports2.renderRouteRecipients = exports2.renderGroupKey = exports2.renderTelegram = exports2.escapeTelegram = exports2.renderSlack = exports2.escapeSlack = exports2.TemplateRenderError = exports2.SafeString = void 0;
     var engine_1 = require_engine();
     Object.defineProperty(exports2, "SafeString", { enumerable: true, get: function() {
       return engine_1.SafeString;
@@ -43591,6 +43612,9 @@ var require_dist4 = __commonJS({
       return telegram_1.renderTelegram;
     } });
     var recipients_1 = require_recipients();
+    Object.defineProperty(exports2, "renderGroupKey", { enumerable: true, get: function() {
+      return recipients_1.renderGroupKey;
+    } });
     Object.defineProperty(exports2, "renderRouteRecipients", { enumerable: true, get: function() {
       return recipients_1.renderRouteRecipients;
     } });

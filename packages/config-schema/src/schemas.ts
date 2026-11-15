@@ -81,6 +81,16 @@ export const blockSchema = z.union([
 ]);
 export type Block = z.infer<typeof blockSchema>;
 
+const WINDOW_UNITS = { s: 1, m: 60, h: 3600 } as const;
+const MAX_WINDOW_SECONDS = 24 * 3600;
+
+/** `90s`, `15m`, `2h` — kept as seconds. */
+const windowSchema = z
+  .string()
+  .regex(/^[1-9]\d*[smh]$/, "must be a duration like 90s, 15m or 2h")
+  .transform((v) => Number(v.slice(0, -1)) * WINDOW_UNITS[v.slice(-1) as keyof typeof WINDOW_UNITS])
+  .refine((seconds) => seconds <= MAX_WINDOW_SECONDS, { message: "must be at most 24h" });
+
 export const destinationSchema = z.union([
   ...placeSchema.options,
   z.strictObject({ place: slugSchema }),
@@ -116,6 +126,12 @@ export const routeSchema = z.strictObject({
    * separated by spaces or commas; anything that is not a recipient is left out.
    */
   recipients: z.array(z.string().min(1)).default([]),
+  /**
+   * Repeats of the same thing — an alert that keeps firing — update one message instead
+   * of posting again. `key` is a Liquid template over `data` saying what "the same" is;
+   * a group stays open for `window` after its first notification.
+   */
+  group: z.strictObject({ key: z.string().min(1), window: windowSchema }).optional(),
   mentions: z.enum(["recipients", "none"]).default("recipients"),
   /**
    * Also send each recipient a personal copy in their preferred channel (Slack or

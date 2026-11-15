@@ -19,6 +19,10 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 - A route can add recipients on its own with `recipients`: Liquid templates over `data` that
   render to people, teams or places (`github:{{ data.commit.author }}`). What does not render
   to a recipient is left out, so a webhook payload never fails the request.
+- Grouping: a route with `group: { key, window }` turns repeats of the same thing — an alert
+  that keeps firing — into edits of one message, with a line saying how many times it
+  repeated. `key` is a Liquid template over `data`; a group stays open for `window` (up to
+  24h) after its first notification.
 - A route without `destinations` names a `default_place`: where a notification is posted when
   it reaches nobody else — its recipients name no place and get no personal copy.
 
@@ -32,7 +36,9 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 
 ### Operator actions
 
-- A database migration adds the `hooks` table; it runs on start unless `MIGRATE_ON_START=false`.
+- Database migrations add the `hooks` table and a column to `notifications`; they run on
+  start unless `MIGRATE_ON_START=false`.
+- `thread_key` values that start with `group:` are refused: those threads belong to grouping.
 - A hook's token is part of its URL. Keep request paths under `/v1/hooks/` out of access logs
   of the proxy in front of Callog, and make that path reachable from the systems that send.
 - In the config repo, rename `buttons:` to `actions:` in route templates and rewrite routes
