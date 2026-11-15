@@ -2,10 +2,12 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { asc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DB, type Db } from "../src/db/db";
-import { deliveries, notifications, tenants, unmappedRecipients } from "../src/db/schema";
+import { deliveries, notifications, persons, tenants, unmappedRecipients } from "../src/db/schema";
 import { DeliveryService } from "../src/delivery/delivery.service";
 import { NotificationsService } from "../src/notifications/notifications.service";
+import { TraceService } from "../src/notifications/trace.service";
 import { PeopleService, type AccountInput } from "../src/identity/people.service";
+import { PreferencesService } from "../src/identity/preferences.service";
 import { SlackApiError } from "../src/slack/slack-api";
 import { SlackConnectionsService } from "../src/slack/slack-connections.service";
 import { TelegramApiError } from "../src/telegram/telegram-api";
@@ -154,6 +156,53 @@ describe("reaching a person another way (integration)", () => {
     expect(new Set((await db.select().from(unmappedRecipients)).map((u) => u.ref))).toEqual(
       new Set(["github:dan", "github:ghost"]),
     );
+  });
+
+  it("explains what happened to each recipient", async () => {
+    const [bob] = await db.select().from(persons).where(eq(persons.displayName, "Bob"));
+    await app.get(PreferencesService).mute(tenantId, bob!.id, "r");
+    slack.failures = [blocked()];
+
+    const { rows } = await deliver([
+      "github:alice",
+      "github:bob",
+      "github:dan",
+      "github:ghost",
+      "team:ghosts",
+    ]);
+    const forSender = await app.get(NotificationsService).get(tenantId, rows[0]!.notificationId);
+
+    const [notification] = await db.select().from(notifications);
+    const trace = await app.get(TraceService).of(notification!);
+
+    expect(trace.notes.map((n) => `${n.recipient.name}: ${n.note}`).sort()).toEqual([
+      "Bob: muted",
+      "Dan: no_account",
+      "ghost: unknown",
+      "ghosts: empty_team",
+    ]);
+    const shown = trace.deliveries.map((d) => ({
+      to: `${d.provider} ${d.destination} ${d.status}`,
+      for: d.for.map((recipient) => recipient.name),
+      replaced: d.fallbackTo !== null,
+    }));
+    expect(shown).toEqual(
+      expect.arrayContaining([
+        { to: "slack dm:UA failed", for: ["Alice"], replaced: true },
+        { to: "telegram dm:42 sent", for: ["Alice"], replaced: false },
+        { to: "slack #ghosts sent", for: [], replaced: false },
+        { to: "slack #lost sent", for: ["Dan", "ghost"], replaced: false },
+      ]),
+    );
+    expect(shown).toHaveLength(4);
+
+    // A sender learns which of its own refs led nowhere, and nothing about the people.
+    expect(forSender.status).toBe("delivered");
+    expect(forSender.notes.map((n) => `${n.recipient}: ${n.note}`).sort()).toEqual([
+      "github:ghost: unknown",
+      "team:ghosts: empty_team",
+    ]);
+    expect(JSON.stringify(forSender)).not.toMatch(/Alice|Bob|Dan|muted/);
   });
 
   it("falls back when the attempts run out, not only on a refusal", async () => {

@@ -579,6 +579,25 @@ teams:
     expect((await call("GET", "/api/admin/api-keys")).json()[0].revokedAt).not.toBeNull();
   });
 
+  it("lists the places of the config with the routes that use them", async () => {
+    await activateConfig(
+      app,
+      tenantId,
+      {
+        "places.yaml": 'places: { deploys: { slack: "#deploys" }, lost: { telegram: "-1001" } }',
+        "routes/a.yaml":
+          "id: a\nallowed_sources: { api_keys: [ci] }\ndestinations: [{ place: deploys }]\ntemplate: [{ text: hi }]",
+        "routes/b.yaml":
+          "id: b\nallowed_sources: { api_keys: [ci] }\ndefault_place: lost\ntemplate: [{ text: hi }]",
+      },
+      "def",
+    );
+    expect((await call("GET", "/api/admin/places")).json()).toEqual([
+      { name: "deploys", channel: "slack", room: "#deploys", routes: ["a"], defaultFor: [] },
+      { name: "lost", channel: "telegram", room: "-1001", routes: [], defaultFor: ["b"] },
+    ]);
+  });
+
   it("manages hooks", async () => {
     const created = (
       await call("POST", "/api/admin/hooks", { name: "grafana", route: "r" })

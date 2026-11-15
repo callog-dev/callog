@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { parseRef, type Config, type Ref, type Route } from "@callog/config-schema";
 import type { ChannelId } from "../channels/channel";
 import { ChannelRegistry } from "../channels/channel-registry";
+import type { TraceNote } from "../db/schema";
 import { PreferencesService } from "../identity/preferences.service";
 import { RecipientResolver } from "../routing/recipient-resolver";
 import {
@@ -21,6 +22,8 @@ export interface PersonalCopy extends Target {
 
 export interface PersonalPlan {
   copies: PersonalCopy[];
+  /** Who gets no copy of their own, and why. */
+  notes: TraceNote[];
   /** Recipients with no account in any channel, and why (for teams). */
   unreached: Ref[];
   reasons: Map<Ref, string>;
@@ -81,25 +84,33 @@ export class PersonalCopies {
     const lastResort = defaultTargets(route, config, this.channels);
     const prefs = await this.preferences.getMany([...people.keys()]);
     const copies = new CopySet();
+    const notes: TraceNote[] = [];
     for (const [personId, { accounts, teams }] of people) {
+      const recipient: Ref = `person:${personId}`;
       const pref = prefs.get(personId)!;
-      if (pref.mutedRoutes.includes(route.id)) continue;
+      if (pref.mutedRoutes.includes(route.id)) {
+        notes.push({ recipient, note: "muted" });
+        continue;
+      }
       const direct = [...new Set([pref.dmChannel, ...channelIds])]
         .filter((id) => accounts.has(id))
         .map((id) => personalTarget(id, accounts.get(id)!));
-      copies.add(
-        [...direct, ...[...teams].flatMap(teamRooms), ...lastResort],
-        [`person:${personId}`],
-      );
+      if (direct.length === 0) notes.push({ recipient, note: "no_account" });
+      copies.add([...direct, ...[...teams].flatMap(teamRooms), ...lastResort], [recipient]);
     }
     for (const ref of unreached) {
       if (known.has(ref)) continue;
       const { kind, value } = parseRef(ref);
       // A team's room is for the team; anyone else has to be named.
-      if (kind === "team") copies.add([...teamRooms(value), ...lastResort], []);
-      else copies.add(lastResort, [ref]);
+      if (kind === "team") {
+        notes.push({ recipient: ref, note: "empty_team", detail: reasons.get(ref) });
+        copies.add([...teamRooms(value), ...lastResort], []);
+      } else {
+        notes.push({ recipient: ref, note: "unknown" });
+        copies.add(lastResort, [ref]);
+      }
     }
-    return { copies: copies.list(), unreached: [...unreached], reasons };
+    return { copies: copies.list(), notes, unreached: [...unreached], reasons };
   }
 }
 

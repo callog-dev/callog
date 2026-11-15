@@ -11,6 +11,7 @@ import {
   DIRECT_ROUTE,
   findRoute,
   ownValue,
+  parseRef,
   placeOf,
   splitRecipients,
   type Route,
@@ -27,6 +28,7 @@ import { TenantConfigService } from "../tenant-config/tenant-config.service";
 import { MetricsService } from "../metrics/metrics.service";
 import { DataValidator } from "./data-validator";
 import { GROUP_THREAD_PREFIX, MAX_RECIPIENTS, type NotifyRequest } from "./notify-request";
+import { TraceService } from "./trace.service";
 
 export const DELIVER_TASK = "notification.deliver";
 /**
@@ -63,6 +65,7 @@ export class NotificationsService {
     private readonly queue: QueueService,
     private readonly metrics: MetricsService,
     private readonly audit: AuditService,
+    private readonly trace: TraceService,
   ) {}
 
   async accept(
@@ -182,17 +185,22 @@ export class NotificationsService {
       .from(notifications)
       .where(and(eq(notifications.tenantId, tenantId), eq(notifications.id, notificationId)));
     if (!notification) throw new NotFoundException("Notification not found");
-    const rows = await this.db
-      .select()
-      .from(deliveries)
-      .where(eq(deliveries.notificationId, notificationId));
+    const trace = await this.trace.of(notification);
     return {
       id: notification.id,
       route: notification.routeId,
       status: notification.status,
       thread_key: notification.threadKey,
       created_at: notification.createdAt,
-      deliveries: rows.map((d) => ({
+      group: trace.group,
+      /**
+       * Which of the recipients the sender named led nowhere. What is known about people —
+       * their names, their accounts, what they muted — is for admins, not for senders.
+       */
+      notes: trace.notes
+        .filter((note) => parseRef(note.recipient.ref).kind !== "person")
+        .map(({ recipient, ...note }) => ({ recipient: recipient.ref, ...note })),
+      deliveries: trace.deliveries.map((d) => ({
         id: d.id,
         provider: d.provider,
         destination: d.destination,
@@ -200,7 +208,7 @@ export class NotificationsService {
         attempts: d.attempts,
         last_error: d.lastError,
         sent_at: d.sentAt,
-        /** The delivery that took over when this one failed for good. */
+        /** The delivery that took over when this one could not be delivered. */
         fallback_to: d.fallbackTo,
       })),
     };

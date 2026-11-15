@@ -141,6 +141,12 @@ describe("personal copies and preferences (integration)", () => {
     ]);
     expect(slack.posted[0]!.message.text).toBe("e2e failed bob, <@UA>");
 
+    // Without personal copies the mute still leaves a trace: an admin can see why.
+    await notify("prefs mute quiet", "UB");
+    await deliver("quiet", ["github:bob"]);
+    const quiet = (await db.select().from(notifications)).find((n) => n.routeId === "quiet")!;
+    expect(quiet.trace.map((note) => note.note)).toEqual(["muted"]);
+
     await notify("prefs unmute r", "UB");
     expect(await deliver("r", ["github:bob"])).toContain("slack dm:UB sent");
   });

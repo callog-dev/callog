@@ -34,6 +34,12 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
   they were named through, then in the route's `default_place`, with a line saying whom the
   post is for. People with no account in any messenger start at the room; a team with nobody
   to write to is posted to its room.
+- A delivery trace. Admins see what happened on the way to each recipient: whom each delivery
+  is for, which delivery took over a failed one, who was left out and why (muted the route,
+  no account in any messenger, unknown, a team with nobody to write to), and whether the
+  notification joined a group. `GET /v1/notifications/<id>` tells a sender which of the
+  recipients it named led nowhere and which delivery took over a failed one — nothing about
+  the people themselves.
 - Recipients of a route with personal copies who have no account in any messenger show up
   among the unmapped recipients.
 

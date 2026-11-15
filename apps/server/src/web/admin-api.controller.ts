@@ -35,6 +35,7 @@ import { AuditService } from "../audit/audit.service";
 import { LifecycleJobs } from "../lifecycle/lifecycle.jobs";
 import { RetentionService } from "../lifecycle/retention.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { TraceService } from "../notifications/trace.service";
 import { PreferencesService } from "../identity/preferences.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
 import { apiKeyBody, apiKeyNameSchema, ApiKeysService } from "../producers/api-keys.service";
@@ -153,6 +154,7 @@ export class AdminApiController {
     private readonly people: PeopleService,
     private readonly apiKeys: ApiKeysService,
     private readonly hooks: HooksService,
+    private readonly trace: TraceService,
     private readonly slack: SlackConnectionsService,
     private readonly slackEvents: SlackEvents,
     private readonly telegram: TelegramConnectionsService,
@@ -317,7 +319,6 @@ export class AdminApiController {
       .from(notifications)
       .where(and(eq(notifications.tenantId, req.session!.tenantId), eq(notifications.id, id)));
     if (!n) throw new NotFoundException();
-    const ds = await this.db.select().from(deliveries).where(eq(deliveries.notificationId, id));
     return {
       id: n.id,
       route: n.routeId,
@@ -328,17 +329,7 @@ export class AdminApiController {
       threadKey: n.threadKey,
       update: n.update,
       createdAt: n.createdAt,
-      deliveries: ds.map((d) => ({
-        id: d.id,
-        provider: d.provider,
-        destination: d.destination,
-        status: d.status,
-        attempts: d.attempts,
-        lastError: d.lastError,
-        sentAt: d.sentAt,
-        forPeople: d.forPeople,
-        fallbackTo: d.fallbackTo,
-      })),
+      ...(await this.trace.of(n)),
     };
   }
 
@@ -610,6 +601,30 @@ export class AdminApiController {
   @HttpCode(204)
   async revokeHook(@Req() req: SessionRequest, @Param("name") name: string): Promise<void> {
     if (!(await this.hooks.revoke(req.session!.tenantId, name))) throw new NotFoundException();
+  }
+
+  // ---- Places ----
+
+  /** The places of the active config: the room behind each name, and the routes that use it. */
+  @Get("places")
+  async listPlaces(@Req() req: SessionRequest) {
+    const config = (await this.configs.getActive(req.session!.tenantId))?.config;
+    if (!config) return [];
+    const routes = Object.values(config.routes);
+    const places = Object.entries(config.places).sort(([a], [b]) => a.localeCompare(b));
+    return places.map(([name, place]) => {
+      const [channel, room] =
+        "slack" in place ? ["slack", place.slack] : ["telegram", place.telegram];
+      return {
+        name,
+        channel,
+        room,
+        routes: routes
+          .filter((r) => r.destinations.some((d) => "place" in d && d.place === name))
+          .map((r) => r.id),
+        defaultFor: routes.filter((r) => r.default_place === name).map((r) => r.id),
+      };
+    });
   }
 
   // ---- Config and integrations ----

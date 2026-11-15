@@ -157,6 +157,20 @@ export type NotificationSource =
   /** "Send test" in the admin UI; `actor` is who pressed it (`@login` or a person's name). */
   | { type: "admin_test"; actor: string };
 
+/** Why a recipient of a notification got no message of their own, or no mention. */
+export interface TraceNote {
+  /** `person:<id>` for someone Callog knows, otherwise the ref as the sender wrote it. */
+  recipient: Ref;
+  note:
+    | "muted" // the person muted the route
+    | "no_account" // a known person with no account in any messenger
+    | "unknown" // nobody Callog knows
+    | "empty_team" // a team with nobody to write to
+    | "not_mentioned"; // no account in `channel`, so named as text there
+  channel?: string;
+  detail?: string;
+}
+
 export const notifications = pgTable(
   "notifications",
   {
@@ -176,6 +190,8 @@ export const notifications = pgTable(
     update: boolean("update").notNull().default(false),
     /** What the route's `group.key` rendered to; repeats within the window share a thread. */
     groupKey: text("group_key"),
+    /** Written once, when the deliveries are planned. */
+    trace: jsonb("trace").$type<TraceNote[]>().notNull().default([]),
     status: text("status", {
       enum: ["accepted", "processing", "delivered", "partially_failed", "failed"],
     })

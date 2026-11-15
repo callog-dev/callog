@@ -12,7 +12,7 @@ import { and, asc, count, eq, inArray, lt, max, ne, sql } from "drizzle-orm";
 import { MessageGoneError, type Channel, type ChannelId } from "../channels/channel";
 import { ChannelRegistry } from "../channels/channel-registry";
 import { DB, type Db } from "../db/db";
-import { deliveries, notifications, type ProviderMessageRef } from "../db/schema";
+import { deliveries, notifications, type ProviderMessageRef, type TraceNote } from "../db/schema";
 import { MetricsService } from "../metrics/metrics.service";
 import { RecipientResolver, type Resolution } from "../routing/recipient-resolver";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
@@ -191,8 +191,10 @@ export class DeliveryService {
     places: string[],
   ): Promise<Delivery[]> {
     const targets = routeTargets(route, config, this.channels, places);
+    const notes: TraceNote[] = [];
     // Unmapped recipients are counted once per notification, not per retry.
     const counted = new Set<ChannelId>();
+    const mentionable = new Set<string>();
     if (route.mentions !== "none") {
       for (const provider of new Set(targets.map((t) => t.provider))) {
         const resolution = await this.resolver.resolve(
@@ -209,6 +211,17 @@ export class DeliveryService {
           resolution.reasons,
         );
         counted.add(provider);
+        for (const ref of resolution.unmapped) {
+          const detail = resolution.reasons.get(ref);
+          notes.push({ recipient: ref, note: "not_mentioned", channel: provider, detail });
+        }
+        resolution.refs.forEach((r) => r.persons.forEach((p) => mentionable.add(p.personId)));
+      }
+      // With personal copies, the plan below says who muted the route.
+      if (!route.dm) {
+        for (const personId of await this.preferences.mutedAmong([...mentionable], route.id)) {
+          notes.push({ recipient: `person:${personId}`, note: "muted" });
+        }
       }
     }
     const planned = new Map<string, Target & Partial<PersonalCopy>>();
@@ -228,6 +241,7 @@ export class DeliveryService {
         recipients,
       );
       personal.copies.forEach(plan);
+      notes.push(...personal.notes);
       // Someone with no account anywhere got no copy: an admin has to see that.
       for (const channel of this.channels.all()) {
         if (counted.has(channel.id)) continue;
@@ -241,6 +255,12 @@ export class DeliveryService {
       }
     }
     if (planned.size === 0) defaultTargets(route, config, this.channels).forEach(plan);
+    if (notes.length > 0) {
+      await this.db
+        .update(notifications)
+        .set({ trace: notes })
+        .where(eq(notifications.id, notification.id));
+    }
     if (planned.size === 0) return [];
     return this.db
       .insert(deliveries)
