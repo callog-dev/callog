@@ -22,6 +22,10 @@ window.matchMedia ??= (query: string) =>
 // cmdk keeps the selected item in view.
 Element.prototype.scrollIntoView ??= () => {};
 
+// Radix Select follows the pointer; jsdom has no pointer capture.
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.releasePointerCapture ??= () => {};
+
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
   cleanup();

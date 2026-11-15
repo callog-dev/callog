@@ -6,10 +6,12 @@ import { ApiKeysTab } from "./api-keys";
 import { ConfigPage } from "./config";
 import { DeliveriesTab } from "./deliveries";
 import { GettingStarted } from "./getting-started";
+import { HooksTab } from "./hooks";
 import { IntegrationsPage } from "./integrations";
 import { MaintenancePage } from "./maintenance";
 import { OverviewTab } from "./overview";
 import { PeoplePage } from "./people";
+import { PlacesTab } from "./places";
 import { SettingsTab } from "./settings";
 import { TeamsTab } from "./teams";
 
@@ -29,12 +31,14 @@ export function AdminRoutes({ me }: { me: Me }) {
       <Route path="deliveries/:id?" element={<DeliveriesTab />} />
       <Route path="people/*" element={<PeoplePage />} />
       <Route path="teams" element={<TeamsTab />} />
+      <Route path="places" element={<PlacesTab />} />
       <Route path="integrations" element={<IntegrationsPage />} />
       <Route path="config/:versionId?" element={<ConfigPage />} />
       <Route path="settings" element={<RouteTabs tabs={SETTINGS} />}>
         <Route index element={<SettingsTab />} />
         <Route path="admins" element={<AdminsTab me={me} />} />
         <Route path="api-keys" element={<ApiKeysTab />} />
+        <Route path="hooks" element={<HooksTab />} />
         <Route path="maintenance" element={<MaintenancePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/manage" replace />} />
@@ -46,5 +50,6 @@ const SETTINGS = [
   { title: "General", url: "/manage/settings" },
   { title: "Admins", url: "/manage/settings/admins" },
   { title: "API keys", url: "/manage/settings/api-keys" },
+  { title: "Hooks", url: "/manage/settings/hooks" },
   { title: "Maintenance", url: "/manage/settings/maintenance" },
 ];

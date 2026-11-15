@@ -1,6 +1,7 @@
 import {
   FileCode,
   LayoutDashboard,
+  MapPin,
   Plug,
   Route,
   Send,
@@ -27,6 +28,7 @@ export const WORKSPACE: NavItem[] = [
   { title: "Deliveries", url: "/manage/deliveries", icon: Send },
   { title: "People", url: "/manage/people", icon: Users },
   { title: "Teams", url: "/manage/teams", icon: UsersRound },
+  { title: "Places", url: "/manage/places", icon: MapPin },
   { title: "Config", url: "/manage/config", icon: FileCode },
   { title: "Integrations", url: "/manage/integrations", icon: Plug },
   { title: "Settings", url: "/manage/settings", icon: Settings },

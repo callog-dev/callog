@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { GitBranch, KeyRound } from "lucide-react";
 import { ProviderBadge } from "@/components/provider-badge";
 import { Switch } from "@/components/ui/switch";
@@ -57,5 +58,14 @@ export function MuteSwitch({ route, linked }: { route: RouteSummary; linked: boo
           : "Link your GitHub account to manage personal copies"}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+/** A route by its id, linking to its page. */
+export function RouteLink({ id }: { id: string }) {
+  return (
+    <Link className="underline-offset-4 hover:underline" to={`/routes/${encodeURIComponent(id)}`}>
+      {id}
+    </Link>
   );
 }

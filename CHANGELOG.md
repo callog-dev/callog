@@ -40,6 +40,10 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
   notification joined a group. `GET /v1/notifications/<id>` tells a sender which of the
   recipients it named led nowhere and which delivery took over a failed one — nothing about
   the people themselves.
+- In the web UI: a notification's page traces its deliveries — whom each is for, what took
+  over a refused one, who was left out and why; Settings → Hooks creates and revokes hooks;
+  Places lists the rooms behind each name with the routes that use them; an API key can be
+  created with direct messages allowed.
 - Recipients of a route with personal copies who have no account in any messenger show up
   among the unmapped recipients.
 

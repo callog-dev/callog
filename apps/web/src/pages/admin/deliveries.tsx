@@ -19,7 +19,13 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUrlState } from "@/hooks/use-url-state";
-import { adminApi, api, type NotificationRow, type NotificationStatus } from "@/lib/api";
+import {
+  adminApi,
+  api,
+  type NotificationRow,
+  type NotificationStatus,
+  type TraceNote,
+} from "@/lib/api";
 import { ago } from "@/lib/time";
 
 const STATUS_VARIANT: Record<
@@ -54,6 +60,22 @@ function describeSource(s: NotificationRow["source"]): { key: string | null; lab
   if (s.type === "api_key") return { key: s.apiKeyName, label: `key ${s.apiKeyName}` };
   if (s.type === "hook") return { key: null, label: `hook ${s.hookName}` };
   return { key: null, label: `test by ${s.actor}` };
+}
+
+/** Why a recipient got no message of their own, or no mention, in words. */
+function describeNote({ recipient, note, channel, detail }: TraceNote): string {
+  switch (note) {
+    case "muted":
+      return `${recipient.name} muted this route`;
+    case "no_account":
+      return `${recipient.name} has no account in any messenger`;
+    case "unknown":
+      return `${recipient.ref} is nobody Callog knows`;
+    case "empty_team":
+      return `Team ${recipient.name} has nobody to write to${detail ? `: ${detail}` : ""}`;
+    case "not_mentioned":
+      return `${recipient.ref} is named as text in ${channel}${detail ? `: ${detail}` : ""}`;
+  }
 }
 
 const FILTERS = { status: "all", route: "all", source: "", period: "all" };
@@ -279,7 +301,11 @@ function Details({ id }: { id: string }) {
   if (n.isError) return <ErrorState error={n.error} retry={() => void n.refetch()} />;
   if (!n.data) return <Skeleton className="m-4 h-64" />;
   const d = n.data;
-  const failed = d.deliveries.filter((x) => x.status === "failed").length;
+  const byId = new Map(d.deliveries.map((x) => [x.id, x]));
+  // A delivery that another one took over is not sent again.
+  const failed = d.deliveries.filter((x) => x.status === "failed" && !x.fallbackTo).length;
+  // The server retries only a notification that ended with something undelivered.
+  const retryable = d.status === "failed" || d.status === "partially_failed";
 
   return (
     <>
@@ -296,7 +322,7 @@ function Details({ id }: { id: string }) {
         <section>
           <div className="mb-2 flex items-center justify-between">
             <h3 className="font-medium">Deliveries</h3>
-            {failed > 0 && d.status !== "processing" && d.status !== "accepted" && (
+            {failed > 0 && retryable && (
               <Button
                 size="sm"
                 variant="outline"
@@ -316,21 +342,60 @@ function Details({ id }: { id: string }) {
               </Button>
             )}
           </div>
+          {d.group && (
+            <p className="mb-2 text-muted-foreground">
+              {d.group.joined
+                ? "A repeat: it edited the message of its group instead of posting again."
+                : "The first of its group: repeats will edit this message."}{" "}
+              Group key <code className="rounded bg-muted px-1">{d.group.key}</code>
+            </p>
+          )}
           <div className="space-y-2">
-            {d.deliveries.map((x, i) => (
-              <div key={i} className="rounded-md border p-2">
-                <div className="flex items-center justify-between gap-2">
-                  <ProviderBadge provider={x.provider}>{x.destination}</ProviderBadge>
-                  <span className="text-xs text-muted-foreground">
-                    {x.status} · {x.attempts} attempt{x.attempts === 1 ? "" : "s"}
-                    {x.sentAt && ` · ${ago(x.sentAt)}`}
-                  </span>
+            {d.deliveries.map((x) => {
+              const next = x.fallbackTo ? byId.get(x.fallbackTo) : undefined;
+              return (
+                <div key={x.id} className="rounded-md border p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <ProviderBadge provider={x.provider}>{x.destination}</ProviderBadge>
+                    <span className="text-xs text-muted-foreground">
+                      {x.status} · {x.attempts} attempt{x.attempts === 1 ? "" : "s"}
+                      {x.sentAt && ` · ${ago(x.sentAt)}`}
+                    </span>
+                  </div>
+                  {x.for.length > 0 && (
+                    <p className="mt-1 text-muted-foreground">
+                      For {x.for.map((recipient) => recipient.name).join(", ")}
+                    </p>
+                  )}
+                  {x.lastError && (
+                    <p className={next ? "mt-1 text-muted-foreground" : "mt-1 text-destructive"}>
+                      {x.lastError}
+                    </p>
+                  )}
+                  {next && (
+                    <p className="mt-1">
+                      Sent to <code className="rounded bg-muted px-1">{next.destination}</code>{" "}
+                      instead
+                    </p>
+                  )}
                 </div>
-                {x.lastError && <p className="mt-1 text-destructive">{x.lastError}</p>}
-              </div>
-            ))}
+              );
+            })}
+            {d.deliveries.length === 0 && (
+              <p className="text-muted-foreground">Nothing was sent.</p>
+            )}
           </div>
         </section>
+        {d.notes.length > 0 && (
+          <section>
+            <h3 className="mb-2 font-medium">Left out</h3>
+            <ul className="space-y-1">
+              {d.notes.map((note, i) => (
+                <li key={i}>{describeNote(note)}</li>
+              ))}
+            </ul>
+          </section>
+        )}
         <section>
           <h3 className="mb-2 font-medium">Recipients</h3>
           <div className="flex flex-wrap gap-1">
