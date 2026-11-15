@@ -1,5 +1,11 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { ownValue, type Config, type Ref, type Route } from "@callog/config-schema";
+import {
+  ownValue,
+  splitRecipients,
+  type Config,
+  type Ref,
+  type Route,
+} from "@callog/config-schema";
 import { TemplateRenderError } from "@callog/templates";
 import { and, asc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { MessageGoneError, type Channel, type ChannelId } from "../channels/channel";
@@ -9,7 +15,13 @@ import { deliveries, notifications, type ProviderMessageRef } from "../db/schema
 import { MetricsService } from "../metrics/metrics.service";
 import { RecipientResolver } from "../routing/recipient-resolver";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
-import { parseDestination, personalTarget, routeTargets, type Target } from "./destinations";
+import {
+  defaultTargets,
+  parseDestination,
+  personalTarget,
+  routeTargets,
+  type Target,
+} from "./destinations";
 import { PreferencesService } from "../identity/preferences.service";
 import { DESTINATION_RATE_LIMITER, DestinationRateLimiter } from "./rate-limiter";
 
@@ -97,9 +109,9 @@ export class DeliveryService {
     if (!config || !route) {
       return this.finish(notification, rows, "Route no longer exists in the config version");
     }
-    const recipients = notification.recipients as Ref[];
+    const { people: recipients, places } = splitRecipients(notification.recipients);
     if (rows.length === 0) {
-      rows = await this.createDeliveries(notification, route, config, recipients);
+      rows = await this.createDeliveries(notification, route, config, recipients, places);
     }
     await this.setStatus(notification.id, "processing");
 
@@ -162,8 +174,9 @@ export class DeliveryService {
     route: Route,
     config: Config,
     recipients: Ref[],
+    places: string[],
   ): Promise<Delivery[]> {
-    const targets = routeTargets(route, config, this.channels);
+    const targets = routeTargets(route, config, this.channels, places);
     // Unmapped recipients are counted once per notification, not per retry.
     for (const provider of new Set(targets.map((t) => t.provider))) {
       const resolution = await this.resolver.resolve(
@@ -184,6 +197,7 @@ export class DeliveryService {
     }
     if (route.dm)
       targets.push(...(await this.dmTargets(notification.tenantId, route, config, recipients)));
+    if (targets.length === 0) targets.push(...defaultTargets(route, config, this.channels));
     if (targets.length === 0) return [];
     return this.db
       .insert(deliveries)

@@ -1,4 +1,4 @@
-import { refSchema, slugSchema } from "@callog/config-schema";
+import { placeRefSchema, refSchema, slugSchema } from "@callog/config-schema";
 import { z } from "zod";
 
 export const MAX_BODY_BYTES = 64 * 1024;
@@ -9,8 +9,14 @@ export const notifyRequestSchema = z
   .strictObject({
     route: slugSchema,
     data: z.record(z.string(), z.unknown()).default({}),
+    /** People and teams to mention, and places (`place:<name>`) to post to. */
     recipients: z
-      .array(refSchema(["email", "github", "slack", "telegram", "team", "person"]))
+      .array(
+        z.union([
+          refSchema(["email", "github", "slack", "telegram", "team", "person"]),
+          placeRefSchema,
+        ]),
+      )
       .max(MAX_RECIPIENTS)
       .default([]),
     thread_key: z.string().min(1).max(200).optional(),

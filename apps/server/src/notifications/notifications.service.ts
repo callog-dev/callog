@@ -6,7 +6,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { ownValue } from "@callog/config-schema";
+import { ownValue, splitRecipients } from "@callog/config-schema";
 import { and, eq, gt, lte } from "drizzle-orm";
 import { AuditService, type AuditActor } from "../audit/audit.service";
 import { sha256Hex } from "../crypto/digest";
@@ -71,6 +71,16 @@ export class NotificationsService {
     const route = ownValue(active.config.routes, request.route);
     if (!route) throw new NotFoundException(`Route "${request.route}" not found`);
     this.auth.assertAllowed(route, producer);
+
+    const unknownPlaces = splitRecipients(request.recipients).places.filter(
+      (name) => !ownValue(active.config.places, name),
+    );
+    if (unknownPlaces.length > 0) {
+      throw new UnprocessableEntityException({
+        message: "recipients name places that are not in places.yaml",
+        places: unknownPlaces,
+      });
+    }
 
     if (route.schema) {
       const issues = this.dataValidator.validate(

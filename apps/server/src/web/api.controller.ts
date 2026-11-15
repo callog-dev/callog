@@ -22,7 +22,7 @@ import { parseBody } from "../admin/parse-body";
 import { ChannelRegistry } from "../channels/channel-registry";
 import { DB, type Db } from "../db/db";
 import { identities, persons } from "../db/schema";
-import { routeTargets } from "../delivery/destinations";
+import { defaultTargets, routeTargets } from "../delivery/destinations";
 import { PreferencesService } from "../identity/preferences.service";
 import { TelegramChatTitles } from "../telegram/telegram-chat-titles";
 import { TenantConfigService, type ActiveConfig } from "../tenant-config/tenant-config.service";
@@ -138,7 +138,10 @@ export class ApiController {
     const muted = new Set(personId ? (await this.preferences.get(personId)).mutedRoutes : []);
     const withTargets = routes.map((route) => ({
       route,
-      targets: routeTargets(route, active.config, this.channels),
+      targets: [
+        ...routeTargets(route, active.config, this.channels),
+        ...defaultTargets(route, active.config, this.channels),
+      ],
     }));
     // Telegram destinations are raw chat ids; show the chat title when the bot can see it.
     const titles = await this.chatTitles.titles(

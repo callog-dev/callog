@@ -45,7 +45,10 @@ describe("POST /v1/notify (integration)", () => {
     await db.delete(tenants);
     await db.execute(sql`delete from graphile_worker._private_jobs`);
     tenantId = await createTenant(app, 700);
-    await activateConfig(app, tenantId, { "routes/e2e-failed.yaml": ROUTE });
+    await activateConfig(app, tenantId, {
+      "places.yaml": 'places: { deploys: { slack: "#deploys" } }',
+      "routes/e2e-failed.yaml": ROUTE,
+    });
     token = await oidc.sign("acme/e2e");
   });
 
@@ -202,6 +205,12 @@ describe("POST /v1/notify (integration)", () => {
           { path: "data.run_url", message: 'must match format "uri"' },
         ]),
       );
+    });
+
+    it("422 for a place that is not in the config", async () => {
+      const res = await notify({ ...BODY, recipients: ["place:deploys", "place:nowhere"] });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().places).toEqual(["nowhere"]);
     });
 
     it("422 for update without thread_key", async () => {

@@ -5,6 +5,7 @@ go, what they look like and whom they mention. Callog loads the default branch o
 a change that does not pass validation is rejected and the previous config stays active.
 
 - `routes/*.yaml` — one file per route: who may send to it, where it goes, the message template.
+- `places.yaml` — rooms by name: the Slack channel or Telegram chat behind `place: <name>`.
 - `teams.yaml` — teams as delivery addresses, with members from GitHub teams or Slack user groups.
 - `config.yaml` — settings of the whole organization.
 
@@ -12,7 +13,7 @@ There are no logins or emails here: people link their accounts in Callog.
 
 ## First steps
 
-1. In `routes/hello.yaml`, change `#general` to a channel of yours.
+1. In `places.yaml`, change `#general` to a channel of yours.
 2. Open a pull request: the Validate workflow checks it and comments a preview of the message.
 3. Merge it and send a test notification from Callog → Admin.
 

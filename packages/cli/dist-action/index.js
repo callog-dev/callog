@@ -37818,15 +37818,31 @@ var require_refs = __commonJS({
   "../config-schema/dist/refs.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.slugSchema = exports2.REF_KINDS = void 0;
+    exports2.placeRefSchema = exports2.slugSchema = exports2.REF_KINDS = void 0;
     exports2.refSchema = refSchema;
+    exports2.splitRecipients = splitRecipients;
     exports2.parseRef = parseRef;
     var zod_1 = require_zod();
     exports2.REF_KINDS = ["email", "github", "slack", "telegram", "team", "person"];
-    exports2.slugSchema = zod_1.z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "must be lowercase letters, digits and dashes");
+    var SLUG = "[a-z0-9][a-z0-9-]*";
+    exports2.slugSchema = zod_1.z.string().regex(new RegExp(`^${SLUG}$`), "must be lowercase letters, digits and dashes");
     function refSchema(kinds) {
       const pattern = new RegExp(`^(${kinds.join("|")}):\\S+$`);
       return zod_1.z.string().regex(pattern, `must be a reference like ${kinds.map((k) => `${k}:\u2026`).join(", ")}`).transform((v) => v);
+    }
+    var PLACE_REF = new RegExp(`^place:(${SLUG})$`);
+    exports2.placeRefSchema = zod_1.z.string().regex(PLACE_REF, "must be a reference like place:\u2026").transform((v) => v);
+    function splitRecipients(recipients) {
+      const people = [];
+      const places = [];
+      for (const recipient of recipients) {
+        const place = PLACE_REF.exec(recipient)?.[1];
+        if (place === void 0)
+          people.push(recipient);
+        else
+          places.push(place);
+      }
+      return { people, places };
     }
     function parseRef(ref) {
       const i = ref.indexOf(":");
@@ -37840,7 +37856,7 @@ var require_schemas3 = __commonJS({
   "../config-schema/dist/schemas.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.routeSchema = exports2.destinationSchema = exports2.blockSchema = exports2.teamsFileSchema = exports2.teamSchema = exports2.configFileSchema = exports2.REMOVED_FILES = exports2.REMOVED_KEYS = void 0;
+    exports2.routeSchema = exports2.destinationSchema = exports2.blockSchema = exports2.placesFileSchema = exports2.placeSchema = exports2.teamsFileSchema = exports2.teamSchema = exports2.configFileSchema = exports2.REMOVED_FILES = exports2.REMOVED_KEYS = void 0;
     var zod_1 = require_zod();
     var refs_1 = require_refs();
     exports2.REMOVED_KEYS = {
@@ -37872,6 +37888,13 @@ var require_schemas3 = __commonJS({
     exports2.teamsFileSchema = zod_1.z.strictObject({
       teams: zod_1.z.record(refs_1.slugSchema, exports2.teamSchema).default({})
     });
+    exports2.placeSchema = zod_1.z.union([
+      zod_1.z.strictObject({ slack: zod_1.z.string().min(1) }),
+      zod_1.z.strictObject({ telegram: zod_1.z.string().min(1) })
+    ]);
+    exports2.placesFileSchema = zod_1.z.strictObject({
+      places: zod_1.z.record(refs_1.slugSchema, exports2.placeSchema).default({})
+    });
     exports2.blockSchema = zod_1.z.union([
       zod_1.z.strictObject({ header: zod_1.z.string().min(1) }),
       zod_1.z.strictObject({ text: zod_1.z.string().min(1) }),
@@ -37886,8 +37909,8 @@ var require_schemas3 = __commonJS({
       })
     ]);
     exports2.destinationSchema = zod_1.z.union([
-      zod_1.z.strictObject({ slack: zod_1.z.string().min(1) }),
-      zod_1.z.strictObject({ telegram: zod_1.z.string().min(1) }),
+      ...exports2.placeSchema.options,
+      zod_1.z.strictObject({ place: refs_1.slugSchema }),
       zod_1.z.strictObject({ team: refs_1.slugSchema })
     ]);
     var recipientRefSchema = (0, refs_1.refSchema)(["email", "github", "slack", "telegram", "team", "person"]);
@@ -37900,7 +37923,12 @@ var require_schemas3 = __commonJS({
       }).refine((s) => s.github_repos.length + s.api_keys.length > 0, {
         message: "at least one github_repos or api_keys entry is required"
       }),
-      destinations: zod_1.z.array(exports2.destinationSchema).min(1),
+      destinations: zod_1.z.array(exports2.destinationSchema).default([]),
+      /**
+       * For a route without destinations: where a notification is posted when it reaches
+       * nobody else — its recipients name no place and get no personal copy.
+       */
+      default_place: refs_1.slugSchema.optional(),
       mentions: zod_1.z.enum(["recipients", "none"]).default("recipients"),
       /**
        * Also send each recipient a personal copy in their preferred channel (Slack or
@@ -37931,13 +37959,14 @@ var require_parse3 = __commonJS({
     function ownValue2(record, key) {
       return Object.hasOwn(record, key) ? record[key] : void 0;
     }
-    var ROOT_FILES = ["config.yaml", "teams.yaml"];
+    var ROOT_FILES = ["config.yaml", "teams.yaml", "places.yaml"];
     var ROUTE_FILE = /^routes\/([^/]+)\.ya?ml$/;
     function parseConfigTree(tree) {
       const errors = [];
       const warnings = [];
       const config = parseFile(tree, "config.yaml", schemas_1.configFileSchema, errors);
       const teamsFile = parseFile(tree, "teams.yaml", schemas_1.teamsFileSchema, errors);
+      const placesFile = parseFile(tree, "places.yaml", schemas_1.placesFileSchema, errors);
       for (const [file, message] of Object.entries(schemas_1.REMOVED_FILES)) {
         if (file in tree)
           errors.push({ file, path: [], message });
@@ -37973,12 +38002,13 @@ var require_parse3 = __commonJS({
         routeFiles[route.id] = file;
       }
       const teams = teamsFile?.teams ?? {};
-      checkRoutes(routes, routeFiles, teams, errors);
+      const places = placesFile?.places ?? {};
+      checkRoutes(routes, routeFiles, teams, places, errors);
       if (errors.length > 0)
         return { ok: false, errors, warnings };
       return {
         ok: true,
-        config: { config: config ?? schemas_1.configFileSchema.parse({}), teams, routes },
+        config: { config: config ?? schemas_1.configFileSchema.parse({}), teams, places, routes },
         warnings,
         routeFiles
       };
@@ -38030,11 +38060,34 @@ var require_parse3 = __commonJS({
       const generic = path4.map((p, i) => i % 2 === 1 && path4[i - 1] === "teams" ? "*" : p);
       return `${file} ${[...generic, key].join(".")}`;
     }
-    function checkRoutes(routes, routeFiles, teams, errors) {
+    function checkRoutes(routes, routeFiles, teams, places, errors) {
       for (const [id, route] of Object.entries(routes)) {
         const file = routeFiles[id];
+        const checkPlace = (path4, name) => {
+          if (ownValue2(places, name))
+            return;
+          errors.push({ file, path: path4, message: `unknown place "${name}" (not defined in places.yaml)` });
+        };
         checkDataSchema(route, file, errors);
+        if (route.default_place) {
+          checkPlace(["default_place"], route.default_place);
+          if (route.destinations.length > 0) {
+            errors.push({
+              file,
+              path: ["default_place"],
+              message: "default_place is for routes without destinations"
+            });
+          }
+        } else if (route.destinations.length === 0) {
+          errors.push({
+            file,
+            path: ["destinations"],
+            message: "destinations or default_place is required"
+          });
+        }
         route.destinations.forEach((destination, i) => {
+          if ("place" in destination)
+            checkPlace(["destinations", i, "place"], destination.place);
           if (!("team" in destination))
             return;
           const team = ownValue2(teams, destination.team);
@@ -43521,8 +43574,11 @@ function previewMarkdown(config, routeIds, files = {}) {
 function routeSection(route, config, file) {
   const lines = [`### \`${route.id}\`${route.description ? ` \u2014 ${route.description}` : ""}`, ""];
   const targets = route.destinations.map(
-    (d) => "slack" in d ? `Slack ${d.slack}` : "telegram" in d ? `Telegram ${d.telegram}` : `team ${d.team}${teamChannels(config, d.team)}`
+    (d) => "team" in d ? `team ${d.team}${teamChannels(config, d.team)}` : "place" in d ? namedPlace(config, d.place) : room(d)
   );
+  if (route.default_place) {
+    targets.push(`${namedPlace(config, route.default_place)} when it reaches nobody else`);
+  }
   lines.push(`**To:** ${targets.join(", ")}${route.dm ? " \xB7 personal copies to recipients" : ""}`);
   const sources = [
     ...route.allowed_sources.github_repos.map((r) => `\`${r}\``),
@@ -43571,9 +43627,17 @@ function teamChannels(config, slug) {
   const channels = [team?.slack_channel, team?.telegram_chat].filter(Boolean);
   return channels.length ? ` (${channels.join(", ")})` : "";
 }
+function room(place) {
+  return "slack" in place ? `Slack ${place.slack}` : `Telegram ${place.telegram}`;
+}
+function namedPlace(config, name) {
+  const place = (0, import_config_schema.ownValue)(config.places, name);
+  return `place ${name}${place ? ` (${room(place)})` : ""}`;
+}
 function reachesTelegram(route, config) {
-  return route.destinations.some(
-    (d) => "telegram" in d || "team" in d && Boolean((0, import_config_schema.ownValue)(config.teams, d.team)?.telegram_chat)
+  const isTelegram = (name) => "telegram" in ((0, import_config_schema.ownValue)(config.places, name) ?? {});
+  return route.default_place !== void 0 && isTelegram(route.default_place) || route.destinations.some(
+    (d) => "telegram" in d || "place" in d && isTelegram(d.place) || "team" in d && Boolean((0, import_config_schema.ownValue)(config.teams, d.team)?.telegram_chat)
   );
 }
 function blockKitBuilderUrl(blocks) {

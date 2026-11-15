@@ -1,4 +1,4 @@
-# A first route. Point it at a channel of yours, rename it to what it announces
+# A first route. It posts to the `general` place of places.yaml; rename it to what it announces
 # (e2e-failed, deploy-finished, …) and send to it from CI or a service.
 id: hello
 description: First route, sent from the Callog setup checklist
@@ -8,7 +8,7 @@ allowed_sources:
   # API keys by name, created in Callog → Admin → API keys.
   api_keys: [ci]
 destinations:
-  - slack: "#general"
+  - place: general
 schema:
   type: object
   properties:

@@ -8,6 +8,14 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 
 ## [Unreleased]
 
+### Added
+
+- Places: `places.yaml` gives rooms a name (`deploys: { slack: "#deploys" }`). A route delivers
+  to `place: <name>`, and a sender can add `place:<name>` to `recipients` to post there too —
+  without knowing which messenger or channel is behind the name.
+- A route without `destinations` names a `default_place`: where a notification is posted when
+  it reaches nobody else — its recipients name no place and get no personal copy.
+
 ### Changed
 
 - **Breaking:** a route describes its message with `template` only. The `slack_blocks` key is

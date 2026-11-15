@@ -53,6 +53,18 @@ export const teamsFileSchema = z.strictObject({
   teams: z.record(slugSchema, teamSchema).default({}),
 });
 
+/** A room of one channel: a Slack channel (name or id) or a Telegram chat id. */
+export const placeSchema = z.union([
+  z.strictObject({ slack: z.string().min(1) }),
+  z.strictObject({ telegram: z.string().min(1) }),
+]);
+export type Place = z.infer<typeof placeSchema>;
+
+/** Places by name: routes and producers say `deploys`, only this file says where that is. */
+export const placesFileSchema = z.strictObject({
+  places: z.record(slugSchema, placeSchema).default({}),
+});
+
 // Neutral template blocks. Strings are Liquid templates.
 export const blockSchema = z.union([
   z.strictObject({ header: z.string().min(1) }),
@@ -70,8 +82,8 @@ export const blockSchema = z.union([
 export type Block = z.infer<typeof blockSchema>;
 
 export const destinationSchema = z.union([
-  z.strictObject({ slack: z.string().min(1) }),
-  z.strictObject({ telegram: z.string().min(1) }),
+  ...placeSchema.options,
+  z.strictObject({ place: slugSchema }),
   z.strictObject({ team: slugSchema }),
 ]);
 export type Destination = z.infer<typeof destinationSchema>;
@@ -92,7 +104,12 @@ export const routeSchema = z.strictObject({
     .refine((s) => s.github_repos.length + s.api_keys.length > 0, {
       message: "at least one github_repos or api_keys entry is required",
     }),
-  destinations: z.array(destinationSchema).min(1),
+  destinations: z.array(destinationSchema).default([]),
+  /**
+   * For a route without destinations: where a notification is posted when it reaches
+   * nobody else — its recipients name no place and get no personal copy.
+   */
+  default_place: slugSchema.optional(),
   mentions: z.enum(["recipients", "none"]).default("recipients"),
   /**
    * Also send each recipient a personal copy in their preferred channel (Slack or

@@ -3,11 +3,13 @@ import { compileDataSchema, dataIssues } from "./data-schema";
 import type { z } from "zod";
 import {
   configFileSchema,
+  placesFileSchema,
   REMOVED_FILES,
   REMOVED_KEYS,
   routeSchema,
   teamsFileSchema,
   type ConfigFile,
+  type Place,
   type Route,
   type Team,
 } from "./schemas";
@@ -15,6 +17,7 @@ import {
 export interface Config {
   config: ConfigFile;
   teams: Record<string, Team>;
+  places: Record<string, Place>;
   routes: Record<string, Route>;
 }
 
@@ -47,7 +50,7 @@ export type ParseResult =
 /** Raw config repo contents: repo-relative path → file text. */
 export type ConfigTree = Record<string, string>;
 
-const ROOT_FILES = ["config.yaml", "teams.yaml"] as const;
+const ROOT_FILES = ["config.yaml", "teams.yaml", "places.yaml"] as const;
 const ROUTE_FILE = /^routes\/([^/]+)\.ya?ml$/;
 
 /**
@@ -60,6 +63,7 @@ export function parseConfigTree(tree: ConfigTree): ParseResult {
 
   const config = parseFile(tree, "config.yaml", configFileSchema, errors);
   const teamsFile = parseFile(tree, "teams.yaml", teamsFileSchema, errors);
+  const placesFile = parseFile(tree, "places.yaml", placesFileSchema, errors);
   for (const [file, message] of Object.entries(REMOVED_FILES)) {
     if (file in tree) errors.push({ file, path: [], message });
   }
@@ -95,13 +99,14 @@ export function parseConfigTree(tree: ConfigTree): ParseResult {
   }
 
   const teams = teamsFile?.teams ?? {};
+  const places = placesFile?.places ?? {};
 
-  checkRoutes(routes, routeFiles, teams, errors);
+  checkRoutes(routes, routeFiles, teams, places, errors);
 
   if (errors.length > 0) return { ok: false, errors, warnings };
   return {
     ok: true,
-    config: { config: config ?? configFileSchema.parse({}), teams, routes },
+    config: { config: config ?? configFileSchema.parse({}), teams, places, routes },
     warnings,
     routeFiles,
   };
@@ -167,12 +172,34 @@ function checkRoutes(
   routes: Record<string, Route>,
   routeFiles: Record<string, string>,
   teams: Record<string, Team>,
+  places: Record<string, Place>,
   errors: ConfigIssue[],
 ): void {
   for (const [id, route] of Object.entries(routes)) {
     const file = routeFiles[id]!;
+    const checkPlace = (path: (string | number)[], name: string) => {
+      if (ownValue(places, name)) return;
+      errors.push({ file, path, message: `unknown place "${name}" (not defined in places.yaml)` });
+    };
     checkDataSchema(route, file, errors);
+    if (route.default_place) {
+      checkPlace(["default_place"], route.default_place);
+      if (route.destinations.length > 0) {
+        errors.push({
+          file,
+          path: ["default_place"],
+          message: "default_place is for routes without destinations",
+        });
+      }
+    } else if (route.destinations.length === 0) {
+      errors.push({
+        file,
+        path: ["destinations"],
+        message: "destinations or default_place is required",
+      });
+    }
     route.destinations.forEach((destination, i) => {
+      if ("place" in destination) checkPlace(["destinations", i, "place"], destination.place);
       if (!("team" in destination)) return;
       const team = ownValue(teams, destination.team);
       if (!team) {

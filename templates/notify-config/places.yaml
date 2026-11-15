@@ -1,0 +1,8 @@
+# Places are rooms with a name. Routes and senders say `general`; only this file says which
+# Slack channel (or Telegram chat) that is, so moving a place is a one-line change here.
+#
+# places:
+#   deploys: { slack: "#deploys" }
+#   oncall: { telegram: "-1001234567890" }
+places:
+  general: { slack: "#general" }
