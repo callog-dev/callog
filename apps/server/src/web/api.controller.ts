@@ -19,6 +19,7 @@ import type { FastifyReply } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { parseBody } from "../admin/parse-body";
+import { ChannelRegistry } from "../channels/channel-registry";
 import { DB, type Db } from "../db/db";
 import { identities, persons } from "../db/schema";
 import { routeTargets } from "../delivery/destinations";
@@ -44,6 +45,7 @@ export class ApiController {
     private readonly preferences: PreferencesService,
     private readonly adminCheck: AdminCheck,
     private readonly chatTitles: TelegramChatTitles,
+    private readonly channels: ChannelRegistry,
   ) {}
 
   @Get("me")
@@ -137,7 +139,7 @@ export class ApiController {
     const muted = new Set(personId ? (await this.preferences.get(personId)).mutedRoutes : []);
     const withTargets = routes.map((route) => ({
       route,
-      targets: routeTargets(route, active.config),
+      targets: routeTargets(route, active.config, this.channels),
     }));
     // Telegram destinations are raw chat ids; show the chat title when the bot can see it.
     const titles = await this.chatTitles.titles(

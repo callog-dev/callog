@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { ownValue, parseRef, type Config, type Ref } from "@callog/config-schema";
 import { escapeTelegram, type MentionResolver } from "@callog/templates";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import type { ChannelId } from "../channels/channel";
 import { setBounded } from "../common/bounded-map";
 import { DB, type Db } from "../db/db";
 import {
@@ -16,9 +17,6 @@ import { normalizeExternalId } from "../identity/people.service";
 import { MetricsService } from "../metrics/metrics.service";
 import { SlackSender } from "../slack/slack-sender";
 import { TenantsService } from "../tenants/tenants.service";
-
-/** Channels a message can be rendered for. */
-export type TargetProvider = Extract<Provider, "slack" | "telegram">;
 
 /** `person:` recipients carry a Person id. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -110,7 +108,7 @@ export class RecipientResolver {
     tenantId: string,
     config: Config,
     refs: Ref[],
-    target: TargetProvider,
+    target: ChannelId,
   ): Promise<Resolution> {
     // 1. Expand teams into member refs.
     const expanded = new Map<Ref, TeamExpansion>();
@@ -208,7 +206,7 @@ export class RecipientResolver {
   async recordUnmapped(
     tenantId: string,
     refs: Ref[],
-    provider: TargetProvider,
+    provider: ChannelId,
     routeId: string,
     reasons: Map<Ref, string> = new Map(),
   ): Promise<void> {
@@ -384,7 +382,7 @@ export class RecipientResolver {
 }
 
 /** Provider markup for one resolved ref, or undefined to fall back to plain text. */
-function mentionMarkup(resolved: ResolvedRef, target: TargetProvider): string[] | undefined {
+function mentionMarkup(resolved: ResolvedRef, target: ChannelId): string[] | undefined {
   const { kind, value } = parseRef(resolved.ref);
   if (target === "slack") {
     if (resolved.slackUsergroupId) return [`<!subteam^${resolved.slackUsergroupId}>`];

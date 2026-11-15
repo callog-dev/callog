@@ -99,7 +99,7 @@ export async function createTestApp(
     .useValue(appConversion)
     // No real spacing between messages in tests.
     .overrideProvider(DESTINATION_RATE_LIMITER)
-    .useValue(new DestinationRateLimiter({ default: 0, telegramGroup: 0 }))
+    .useValue(new DestinationRateLimiter(0))
     .compile();
   // The startup reconcile runs in the background and deactivates every tenant the fake GitHub
   // has no installation for, racing the tenants a test inserts. Tests reconcile explicitly.

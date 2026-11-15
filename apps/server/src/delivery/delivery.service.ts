@@ -1,23 +1,15 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { ownValue, type Config, type Ref, type Route } from "@callog/config-schema";
-import {
-  renderSlack,
-  renderTelegram,
-  TemplateRenderError,
-  type SlackMessage,
-  type TelegramMessage,
-} from "@callog/templates";
+import { TemplateRenderError } from "@callog/templates";
 import { and, asc, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { MessageGoneError, type Channel, type ChannelId } from "../channels/channel";
+import { ChannelRegistry } from "../channels/channel-registry";
 import { DB, type Db } from "../db/db";
 import { deliveries, notifications, type ProviderMessageRef } from "../db/schema";
 import { MetricsService } from "../metrics/metrics.service";
 import { RecipientResolver } from "../routing/recipient-resolver";
-import { SlackApiError } from "../slack/slack-api";
-import { SlackSender } from "../slack/slack-sender";
-import { TelegramApiError } from "../telegram/telegram-api";
-import { TelegramSender } from "../telegram/telegram-sender";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
-import { routeTargets, type Target } from "./destinations";
+import { parseDestination, personalTarget, routeTargets, type Target } from "./destinations";
 import { PreferencesService } from "../identity/preferences.service";
 import { DESTINATION_RATE_LIMITER, DestinationRateLimiter } from "./rate-limiter";
 
@@ -25,15 +17,7 @@ type Notification = typeof notifications.$inferSelect;
 type Delivery = typeof deliveries.$inferSelect;
 type NotificationStatus = Notification["status"];
 
-/** Slack errors worth retrying; everything else from Slack is a permanent failure. */
-const TRANSIENT_SLACK_ERRORS = new Set([
-  "ratelimited",
-  "internal_error",
-  "fatal_error",
-  "service_unavailable",
-  "request_timeout",
-]);
-/** A short 429 is waited out inside the job; longer ones fall back to the job backoff. */
+/** A short rate limit is waited out inside the job; longer ones fall back to the job backoff. */
 const MAX_INLINE_RETRY_AFTER_S = 30;
 
 export interface AttemptInfo {
@@ -51,21 +35,13 @@ export class RetryLater extends Error {
 
 class PermanentFailure extends Error {}
 
-/** Destination of a personal copy: `dm:<Slack user id | Telegram user id>`. */
-const DM_PREFIX = "dm:";
-
 interface ThreadContext {
   root: ProviderMessageRef | undefined;
   update: boolean;
 }
 
-/** Slack errors meaning the message to edit no longer exists. */
-const SLACK_GONE = new Set(["message_not_found", "cant_update_message", "channel_not_found"]);
-
-type Rendered =
-  | { provider: "slack"; message: SlackMessage }
-  | { provider: "telegram"; message: TelegramMessage }
-  | PermanentFailure;
+/** A message in the channel's own format, or why there is none. */
+type Rendered = { channel: Channel; message: unknown } | PermanentFailure;
 
 /**
  * Delivers one notification to every destination of its route.
@@ -80,8 +56,7 @@ export class DeliveryService {
     @Inject(DB) private readonly db: Db,
     private readonly configs: TenantConfigService,
     private readonly resolver: RecipientResolver,
-    private readonly slack: SlackSender,
-    private readonly telegram: TelegramSender,
+    private readonly channels: ChannelRegistry,
     private readonly metrics: MetricsService,
     @Inject(DESTINATION_RATE_LIMITER) private readonly limiter: DestinationRateLimiter,
     private readonly preferences: PreferencesService,
@@ -139,26 +114,15 @@ export class DeliveryService {
             this.render(delivery.provider, notification, route, config, recipients),
           );
         }
-        const message = await rendered.get(delivery.provider)!;
-        if (message instanceof PermanentFailure) throw message;
-        const thread: ThreadContext = {
-          root: await this.threadRoot(notification, delivery),
-          update: notification.update,
-        };
-        const ref =
-          message.provider === "slack"
-            ? await this.sendSlack(
-                notification.tenantId,
-                delivery.destination,
-                message.message,
-                thread,
-              )
-            : await this.sendTelegram(
-                notification.tenantId,
-                delivery.destination,
-                message.message,
-                thread,
-              );
+        const outcome = await rendered.get(delivery.provider)!;
+        if (outcome instanceof PermanentFailure) throw outcome;
+        const ref = await this.send(
+          outcome.channel,
+          notification.tenantId,
+          delivery.destination,
+          outcome.message,
+          { root: await this.threadRoot(notification, delivery), update: notification.update },
+        );
         await this.markSent(delivery, ref);
         this.metrics.deliveries.inc({ provider: delivery.provider, status: "sent" });
         this.metrics.deliveryLatency.observe(
@@ -166,7 +130,7 @@ export class DeliveryService {
           (Date.now() - notification.createdAt.getTime()) / 1000,
         );
       } catch (err) {
-        const { permanent, message } = classify(err);
+        const { permanent, message } = classify(err, this.channels.get(delivery.provider));
         await this.db
           .update(deliveries)
           .set({
@@ -199,7 +163,7 @@ export class DeliveryService {
     config: Config,
     recipients: Ref[],
   ): Promise<Delivery[]> {
-    const targets = routeTargets(route, config);
+    const targets = routeTargets(route, config, this.channels);
     // Unmapped recipients are counted once per notification, not per retry.
     for (const provider of new Set(targets.map((t) => t.provider))) {
       const resolution = await this.resolver.resolve(
@@ -235,7 +199,7 @@ export class DeliveryService {
 
   /**
    * Personal copies for routes with `dm: true`: every recipient (teams expanded)
-   * once, in their preferred channel — falling back to the other one they have — unless
+   * once, in their preferred channel — falling back to another one they have — unless
    * they muted the route. Destinations are `dm:<account id>`.
    */
   private async dmTargets(
@@ -244,15 +208,17 @@ export class DeliveryService {
     config: Config,
     recipients: Ref[],
   ): Promise<Target[]> {
-    const accounts = new Map<string, Partial<Record<Target["provider"], string>>>();
-    for (const provider of ["slack", "telegram"] as const) {
-      // slack_blocks cannot be rendered for Telegram.
-      if (provider === "telegram" && !route.template) continue;
-      const resolution = await this.resolver.resolve(tenantId, config, recipients, provider);
+    const channelIds = this.channels
+      .all()
+      .filter((c) => c.canRender(route))
+      .map((c) => c.id);
+    const accounts = new Map<string, Map<ChannelId, string>>();
+    for (const channelId of channelIds) {
+      const resolution = await this.resolver.resolve(tenantId, config, recipients, channelId);
       for (const person of resolution.refs.flatMap((r) => r.persons)) {
-        const entry = accounts.get(person.personId) ?? {};
-        if (person.target) entry[provider] = person.target.externalId;
-        accounts.set(person.personId, entry);
+        const ids = accounts.get(person.personId) ?? new Map<ChannelId, string>();
+        if (person.target) ids.set(channelId, person.target.externalId);
+        accounts.set(person.personId, ids);
       }
     }
     const prefs = await this.preferences.getMany([...accounts.keys()]);
@@ -260,15 +226,13 @@ export class DeliveryService {
     for (const [personId, ids] of accounts) {
       const pref = prefs.get(personId)!;
       if (pref.mutedRoutes.includes(route.id)) continue;
-      const order: Target["provider"][] =
-        pref.dmChannel === "telegram" ? ["telegram", "slack"] : ["slack", "telegram"];
-      const provider = order.find((p) => ids[p]);
-      if (provider) targets.push({ provider, destination: `${DM_PREFIX}${ids[provider]}` });
+      const provider = [pref.dmChannel, ...channelIds].find((id) => ids.has(id));
+      if (provider) targets.push(personalTarget(provider, ids.get(provider)!));
     }
     return targets;
   }
 
-  /** Renders once per provider per attempt; template errors become permanent failures. */
+  /** Renders once per channel per attempt; template errors become permanent failures. */
   private async render(
     provider: Delivery["provider"],
     notification: Notification,
@@ -276,23 +240,17 @@ export class DeliveryService {
     config: Config,
     recipients: Ref[],
   ): Promise<Rendered> {
-    if (provider !== "slack" && provider !== "telegram") {
-      return new PermanentFailure(`${provider} is not a delivery channel`);
-    }
+    const channel = this.channels.get(provider);
+    if (!channel) return new PermanentFailure(`${provider} is not a delivery channel`);
     const resolution = await this.resolver.resolve(
       notification.tenantId,
       config,
       recipients,
-      provider,
+      channel.id,
     );
-    const input = { data: notification.data, recipients };
     try {
-      return provider === "slack"
-        ? { provider, message: renderSlack(route, input, { mention: resolution.mention }).message }
-        : {
-            provider,
-            message: renderTelegram(route, input, { mention: resolution.mention }).message,
-          };
+      const input = { data: notification.data, recipients };
+      return { channel, message: channel.render(route, input, resolution.mention) };
     } catch (err) {
       if (err instanceof TemplateRenderError) {
         return new PermanentFailure(`Template error at ${err.message}`);
@@ -302,70 +260,30 @@ export class DeliveryService {
   }
 
   /**
-   * Slack: no root → new message; root → reply in its thread; root + update → edit the
-   * root (falling back to a new message when it was deleted).
+   * No root → new message; root → reply in its thread; root + update → edit the root
+   * (falling back to a new message when it was deleted or the channel cannot edit).
    */
-  private async sendSlack(
+  private async send(
+    channel: Channel,
     tenantId: string,
-    channel: string,
-    message: SlackMessage,
+    destination: string,
+    message: unknown,
     thread: ThreadContext,
   ): Promise<ProviderMessageRef> {
-    await this.limiter.wait(`${tenantId}:slack:${channel}`);
-    const root = thread.root?.provider === "slack" ? thread.root : undefined;
-    return withInlineRetry(slackRetryAfter, async () => {
-      if (root && thread.update) {
+    const to = parseDestination(destination);
+    await this.limiter.wait(`${tenantId}:${channel.id}:${destination}`, channel.minIntervalMs(to));
+    const root = thread.root?.provider === channel.id ? thread.root : undefined;
+    return withInlineRetry(channel, async () => {
+      if (root && thread.update && channel.edit) {
         try {
-          await this.slack.update(tenantId, root.channel, root.ts, message);
+          await channel.edit(tenantId, root, message);
           return root;
         } catch (err) {
-          if (!(err instanceof SlackApiError && SLACK_GONE.has(err.code))) throw err;
-          this.logger.warn(`Thread root ${root.channel}/${root.ts} is gone, posting a new message`);
+          if (!(err instanceof MessageGoneError)) throw err;
+          this.logger.warn(`Thread root is gone (${err.message}), posting a new message`);
         }
       }
-      const payload = { ...message, threadTs: root && !thread.update ? root.ts : undefined };
-      const posted = channel.startsWith(DM_PREFIX)
-        ? await this.slack.postDirect(tenantId, channel.slice(DM_PREFIX.length), payload)
-        : await this.slack.postToChannel(tenantId, channel, payload);
-      return { provider: "slack", channel: posted.channel, ts: posted.ts };
-    });
-  }
-
-  /** Telegram: same modes — reply to the root, or edit it. */
-  private async sendTelegram(
-    tenantId: string,
-    chatId: string,
-    message: TelegramMessage,
-    thread: ThreadContext,
-  ): Promise<ProviderMessageRef> {
-    // Group and channel ids are negative or @usernames; private chats are positive ids.
-    const isGroup = chatId.startsWith("-") || chatId.startsWith("@");
-    // A personal chat with a Telegram user has the user's id as its chat id.
-    const targetChat = chatId.startsWith(DM_PREFIX) ? chatId.slice(DM_PREFIX.length) : chatId;
-    await this.limiter.wait(
-      `${tenantId}:telegram:${chatId}`,
-      isGroup ? "telegramGroup" : "default",
-    );
-    const root = thread.root?.provider === "telegram" ? thread.root : undefined;
-    return withInlineRetry(telegramRetryAfter, async () => {
-      if (root && thread.update) {
-        try {
-          await this.telegram.edit(tenantId, root.chatId, root.messageId, message);
-          return root;
-        } catch (err) {
-          if (!(
-            err instanceof TelegramApiError && /not found|can't be edited/i.test(err.description)
-          ))
-            throw err;
-          this.logger.warn(
-            `Thread root ${root.chatId}/${root.messageId} is gone, posting a new message`,
-          );
-        }
-      }
-      const sent = await this.telegram.send(tenantId, targetChat, message, {
-        replyToMessageId: root && !thread.update ? root.messageId : undefined,
-      });
-      return { provider: "telegram", chatId: sent.chatId, messageId: sent.messageId };
+      return channel.send(tenantId, to, message, thread.update ? undefined : root);
     });
   }
 
@@ -471,36 +389,20 @@ export class DeliveryService {
   }
 }
 
-function classify(err: unknown): { permanent: boolean; message: string } {
+function classify(err: unknown, channel?: Channel): { permanent: boolean; message: string } {
   if (err instanceof PermanentFailure) return { permanent: true, message: err.message };
-  if (err instanceof SlackApiError) {
-    return { permanent: !TRANSIENT_SLACK_ERRORS.has(err.code), message: `slack: ${err.code}` };
-  }
-  if (err instanceof TelegramApiError) {
-    // 429 and server-side errors are worth retrying; 400/403 (bad chat, bot removed) are not.
-    return {
-      permanent: err.code !== 429 && err.code < 500,
-      message: `telegram: ${err.description}`,
-    };
-  }
+  const known = channel?.classifyError(err);
+  if (known) return known;
   // Network errors, timeouts, bugs: retry.
   return { permanent: false, message: err instanceof Error ? err.message : String(err) };
 }
 
-const slackRetryAfter = (err: unknown) =>
-  err instanceof SlackApiError ? err.retryAfter : undefined;
-const telegramRetryAfter = (err: unknown) =>
-  err instanceof TelegramApiError ? err.retryAfter : undefined;
-
-/** Waits out a short 429 once inside the job; anything else goes to the queue backoff. */
-async function withInlineRetry<T>(
-  retryAfterOf: (err: unknown) => number | undefined,
-  fn: () => Promise<T>,
-) {
+/** Waits out a short rate limit once inside the job; anything else goes to the queue backoff. */
+async function withInlineRetry<T>(channel: Channel, fn: () => Promise<T>) {
   try {
     return await fn();
   } catch (err) {
-    const retryAfter = retryAfterOf(err);
+    const retryAfter = channel.classifyError(err)?.retryAfterSeconds;
     if (retryAfter === undefined || retryAfter > MAX_INLINE_RETRY_AFTER_S) throw err;
     await new Promise((r) => setTimeout(r, retryAfter * 1000));
     return fn();

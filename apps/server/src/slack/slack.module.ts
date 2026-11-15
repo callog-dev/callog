@@ -7,6 +7,7 @@ import { createSlackApi, SLACK_API_FACTORY } from "./slack-api";
 import { SlackCommands } from "./slack-commands";
 import { SlackConnectionsService } from "./slack-connections.service";
 import { SlackEvents } from "./slack-events";
+import { SlackChannel } from "./slack-channel";
 import { SlackSender } from "./slack-sender";
 import { createSlackSocket, SLACK_SOCKET_FACTORY, SlackSocketRunner } from "./slack-socket";
 import { SlackUsersSync } from "./slack-users-sync";
@@ -20,10 +21,11 @@ import { SlackUsersSync } from "./slack-users-sync";
     SlackConnectionsService,
     SlackUsersSync,
     SlackSender,
+    SlackChannel,
     SlackEvents,
     SlackCommands,
     SlackSocketRunner,
   ],
-  exports: [SlackConnectionsService, SlackSender, SlackEvents],
+  exports: [SlackConnectionsService, SlackSender, SlackChannel, SlackEvents],
 })
 export class SlackModule {}

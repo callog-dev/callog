@@ -6,6 +6,7 @@ import { TelegramChatTitles } from "./telegram-chat-titles";
 import { TelegramChatsService } from "./telegram-chats.service";
 import { TelegramConnectionsService } from "./telegram-connections.service";
 import { TelegramPoller } from "./telegram-poller";
+import { TelegramChannel } from "./telegram-channel";
 import { TelegramSender } from "./telegram-sender";
 import { TelegramUpdates } from "./telegram-updates";
 
@@ -18,9 +19,16 @@ import { TelegramUpdates } from "./telegram-updates";
     TelegramChatTitles,
     TelegramChatsService,
     TelegramSender,
+    TelegramChannel,
     TelegramUpdates,
     TelegramPoller,
   ],
-  exports: [TelegramConnectionsService, TelegramChatTitles, TelegramChatsService, TelegramSender],
+  exports: [
+    TelegramConnectionsService,
+    TelegramChatTitles,
+    TelegramChatsService,
+    TelegramSender,
+    TelegramChannel,
+  ],
 })
 export class TelegramModule {}

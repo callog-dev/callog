@@ -1,6 +1,11 @@
 import { parseConfigTree } from "@callog/config-schema";
 import { describe, expect, it } from "vitest";
+import { ChannelRegistry } from "../channels/channel-registry";
+import { SlackChannel } from "../slack/slack-channel";
+import type { SlackSender } from "../slack/slack-sender";
 import { routeTargets } from "./destinations";
+
+const channels = new ChannelRegistry([new SlackChannel({} as SlackSender)]);
 
 describe("routeTargets", () => {
   it("expands teams and de-duplicates channels", () => {
@@ -16,7 +21,7 @@ destinations: [{ slack: "#fe" }, { team: fe }, { team: qa }, { slack: C0123456 }
 template: [{ text: hi }]`,
     });
     if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
-    expect(routeTargets(parsed.config.routes.r!, parsed.config)).toEqual([
+    expect(routeTargets(parsed.config.routes.r!, parsed.config, channels)).toEqual([
       { provider: "slack", destination: "#fe" },
       { provider: "telegram", destination: "fe-chat" },
       { provider: "slack", destination: "C0123456" },

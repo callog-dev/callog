@@ -1,20 +1,34 @@
 import { ownValue, type Config, type Route } from "@callog/config-schema";
-import type { TargetProvider } from "../routing/recipient-resolver";
-import { SLACK_CHANNEL_ID } from "../slack/slack-sender";
+import type { ChannelId, Destination } from "../channels/channel";
+import type { ChannelRegistry } from "../channels/channel-registry";
 
 export interface Target {
-  provider: TargetProvider;
+  provider: ChannelId;
   destination: string;
+}
+
+/** A personal copy is stored as `dm:<the person's account id in the channel>`. */
+const DM_PREFIX = "dm:";
+
+export function personalTarget(provider: ChannelId, accountId: string): Target {
+  return { provider, destination: `${DM_PREFIX}${accountId}` };
+}
+
+/** Reads back the `destination` column of a delivery. */
+export function parseDestination(destination: string): Destination {
+  return destination.startsWith(DM_PREFIX)
+    ? { kind: "person", id: destination.slice(DM_PREFIX.length) }
+    : { kind: "place", id: destination };
 }
 
 /**
  * Concrete places a route delivers to: explicit channels plus each
  * team's channels, de-duplicated.
  */
-export function routeTargets(route: Route, config: Config): Target[] {
+export function routeTargets(route: Route, config: Config, channels: ChannelRegistry): Target[] {
   const targets = new Map<string, Target>();
-  const add = (provider: Target["provider"], destination: string) => {
-    const normalized = provider === "slack" ? normalizeSlackChannel(destination) : destination;
+  const add = (provider: ChannelId, destination: string) => {
+    const normalized = channels.get(provider)?.normalizePlace?.(destination) ?? destination;
     targets.set(`${provider}\n${normalized}`, { provider, destination: normalized });
   };
   for (const d of route.destinations) {
@@ -27,9 +41,4 @@ export function routeTargets(route: Route, config: Config): Target[] {
     }
   }
   return [...targets.values()];
-}
-
-/** `fe-alerts` and `#fe-alerts` are the same channel; ids are kept as is. */
-function normalizeSlackChannel(channel: string): string {
-  return SLACK_CHANNEL_ID.test(channel) || channel.startsWith("#") ? channel : `#${channel}`;
 }
