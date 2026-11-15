@@ -122,6 +122,8 @@ export const apiKeys = pgTable(
     /** First characters of the key, shown in the UI to tell keys apart. */
     prefix: text("prefix").notNull(),
     keyHash: text("key_hash").notNull().unique(),
+    /** May send to the built-in `direct` route: plain text to any person or place. */
+    allowDirect: boolean("allow_direct").notNull().default(false),
     createdAt: createdAt(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),

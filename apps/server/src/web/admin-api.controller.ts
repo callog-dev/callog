@@ -37,7 +37,7 @@ import { RetentionService } from "../lifecycle/retention.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { PreferencesService } from "../identity/preferences.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
-import { apiKeyNameSchema, ApiKeysService } from "../producers/api-keys.service";
+import { apiKeyBody, apiKeyNameSchema, ApiKeysService } from "../producers/api-keys.service";
 import { HooksService } from "../producers/hooks.service";
 import {
   asBadRequest as asSlackBadRequest,
@@ -101,7 +101,6 @@ const peopleQuery = z.object({
 });
 const newerQuery = notificationsQuery.omit({ before: true }).extend({ after: z.uuid() });
 const versionsQuery = z.object({ before: z.iso.datetime({ offset: true }).optional() });
-const apiKeyBody = z.object({ name: apiKeyNameSchema });
 const hookBody = z.object({ name: apiKeyNameSchema, route: slugSchema });
 const adminBody = z.object({ personId: z.uuid() });
 
@@ -566,8 +565,8 @@ export class AdminApiController {
 
   @Post("api-keys")
   async createKey(@Req() req: SessionRequest, @Body() body: unknown) {
-    const { name } = parseBody(apiKeyBody, body);
-    const { key, info } = await this.apiKeys.create(req.session!.tenantId, name);
+    const { name, direct } = parseBody(apiKeyBody, body);
+    const { key, info } = await this.apiKeys.create(req.session!.tenantId, name, { direct });
     return { key, ...info };
   }
 

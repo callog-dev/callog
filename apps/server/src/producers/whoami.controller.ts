@@ -1,5 +1,5 @@
 import { Controller, Get, Headers, NotFoundException, Query } from "@nestjs/common";
-import { ownValue } from "@callog/config-schema";
+import { findRoute } from "@callog/config-schema";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
 import { ProducerAuthService } from "./producer-auth.service";
 
@@ -22,7 +22,7 @@ export class WhoamiController {
     const producer = await this.auth.authenticate(authorization);
     if (routeId) {
       const active = await this.configs.getActive(producer.tenantId);
-      const route = active && ownValue(active.config.routes, routeId);
+      const route = active && findRoute(active.config, routeId);
       if (!route) throw new NotFoundException(`Route "${routeId}" not found`);
       this.auth.assertAllowed(route, producer);
     }

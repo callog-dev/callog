@@ -30,6 +30,33 @@ export function ownValue<T>(record: Record<string, T>, key: string): T | undefin
   return Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
+/**
+ * The route every organization has without writing it: plain text to the people and places
+ * the sender names. People get it as a personal message. Who may use it is a property of
+ * the API key, not of the config.
+ */
+export const DIRECT_ROUTE: Route = {
+  id: "direct",
+  description: "Plain text to the recipients the sender names",
+  allowed_sources: { github_repos: [], api_keys: [] },
+  destinations: [],
+  recipients: [],
+  mentions: "none",
+  dm: true,
+  schema: {
+    type: "object",
+    required: ["text"],
+    properties: { text: { type: "string", minLength: 1 } },
+  },
+  template: [{ text: "{{ data.text }}" }],
+  examples: [],
+};
+
+/** A route of the config, or the built-in one. */
+export function findRoute(config: Config, id: string): Route | undefined {
+  return id === DIRECT_ROUTE.id ? DIRECT_ROUTE : ownValue(config.routes, id);
+}
+
 export interface ConfigIssue {
   /** Path of the file inside the config repo, e.g. `routes/fe-e2e-failed.yaml`. */
   file: string;
@@ -84,6 +111,10 @@ export function parseConfigTree(tree: ConfigTree): ParseResult {
     if (!route) continue;
     if (route.id !== match[1]) {
       errors.push({ file, path: ["id"], message: `must match the file name "${match[1]}"` });
+      continue;
+    }
+    if (route.id === DIRECT_ROUTE.id) {
+      errors.push({ file, path: ["id"], message: `"${route.id}" is a built-in route` });
       continue;
     }
     const defined = ownValue(routeFiles, route.id);

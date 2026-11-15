@@ -7,7 +7,14 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { ownValue, placeOf, splitRecipients, type Route } from "@callog/config-schema";
+import {
+  DIRECT_ROUTE,
+  findRoute,
+  ownValue,
+  placeOf,
+  splitRecipients,
+  type Route,
+} from "@callog/config-schema";
 import { renderGroupKey, renderRouteRecipients, TemplateRenderError } from "@callog/templates";
 import { and, desc, eq, gt, lte, sql } from "drizzle-orm";
 import { AuditService, type AuditActor } from "../audit/audit.service";
@@ -74,7 +81,7 @@ export class NotificationsService {
     const active = await this.configs.getActive(producer.tenantId);
     if (!active)
       throw new ServiceUnavailableException("No valid config is loaded for this organization");
-    const route = ownValue(active.config.routes, request.route);
+    const route = findRoute(active.config, request.route);
     if (!route) throw new NotFoundException(`Route "${request.route}" not found`);
     this.auth.assertAllowed(route, producer);
 
@@ -118,6 +125,9 @@ export class NotificationsService {
         }),
       ]),
     ].slice(0, MAX_RECIPIENTS);
+    if (route.id === DIRECT_ROUTE.id && recipients.length === 0) {
+      throw new UnprocessableEntityException("The direct route needs recipients");
+    }
 
     try {
       const notificationId = await this.db.transaction(async (tx) => {

@@ -12,10 +12,15 @@ export const apiKeyNameSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9_-]*$/, "lowercase letters, digits, - and _");
 
+/** `direct` lets the key send to the built-in `direct` route. */
+export const apiKeyBody = z.object({ name: apiKeyNameSchema, direct: z.boolean().default(false) });
+
 export interface ApiKeyInfo {
   id: string;
   name: string;
   prefix: string;
+  /** May send to the built-in `direct` route. */
+  direct: boolean;
   createdAt: Date;
   lastUsedAt: Date | null;
   revokedAt: Date | null;
@@ -30,11 +35,15 @@ export class ApiKeysService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   /** Returns the plaintext key exactly once. */
-  async create(tenantId: string, name: string): Promise<{ key: string; info: ApiKeyInfo }> {
+  async create(
+    tenantId: string,
+    name: string,
+    { direct = false }: { direct?: boolean } = {},
+  ): Promise<{ key: string; info: ApiKeyInfo }> {
     const { secret: key, display, hash } = mintSecret(API_KEY_PREFIX);
     const rows = await this.db
       .insert(apiKeys)
-      .values({ tenantId, name, prefix: display, keyHash: hash })
+      .values({ tenantId, name, prefix: display, keyHash: hash, allowDirect: direct })
       .onConflictDoNothing({ target: [apiKeys.tenantId, apiKeys.name] })
       .returning();
     if (rows.length === 0) throw new ConflictException(`API key "${name}" already exists`);
@@ -56,13 +65,20 @@ export class ApiKeysService {
   }
 
   /** The active key matching the plaintext, or undefined. Touches `last_used_at`. */
-  async verify(key: string): Promise<{ id: string; tenantId: string; name: string } | undefined> {
+  async verify(
+    key: string,
+  ): Promise<{ id: string; tenantId: string; name: string; direct: boolean } | undefined> {
     if (!key.startsWith(API_KEY_PREFIX)) return undefined;
     const [row] = await this.db
       .update(apiKeys)
       .set({ lastUsedAt: new Date() })
       .where(and(eq(apiKeys.keyHash, sha256Hex(key)), isNull(apiKeys.revokedAt)))
-      .returning({ id: apiKeys.id, tenantId: apiKeys.tenantId, name: apiKeys.name });
+      .returning({
+        id: apiKeys.id,
+        tenantId: apiKeys.tenantId,
+        name: apiKeys.name,
+        direct: apiKeys.allowDirect,
+      });
     return row;
   }
 }
@@ -72,6 +88,7 @@ function toInfo(row: typeof apiKeys.$inferSelect): ApiKeyInfo {
     id: row.id,
     name: row.name,
     prefix: row.prefix,
+    direct: row.allowDirect,
     createdAt: row.createdAt,
     lastUsedAt: row.lastUsedAt,
     revokedAt: row.revokedAt,

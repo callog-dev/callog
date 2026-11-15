@@ -569,8 +569,12 @@ teams:
     expect(created.key).toMatch(/^ntf_/);
     expect((await call("GET", "/api/admin/api-keys")).json()[0]).toMatchObject({
       name: "billing",
+      direct: false,
       revokedAt: null,
     });
+    expect(
+      (await call("POST", "/api/admin/api-keys", { name: "ops", direct: true })).json(),
+    ).toMatchObject({ name: "ops", direct: true });
     expect((await call("DELETE", "/api/admin/api-keys/billing")).statusCode).toBe(204);
     expect((await call("GET", "/api/admin/api-keys")).json()[0].revokedAt).not.toBeNull();
   });

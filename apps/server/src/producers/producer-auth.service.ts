@@ -5,7 +5,7 @@ import {
   Logger,
   UnauthorizedException,
 } from "@nestjs/common";
-import type { Route } from "@callog/config-schema";
+import { DIRECT_ROUTE, type Route } from "@callog/config-schema";
 import type { JWTVerifyGetKey } from "jose";
 import { ENV, type Env } from "../config/env";
 import type { NotificationSource } from "../db/schema";
@@ -19,6 +19,8 @@ export interface Producer {
   source: NotificationSource;
   /** Human-readable, for logs and errors. */
   label: string;
+  /** An API key that may send to the built-in `direct` route. */
+  direct?: boolean;
 }
 
 /** Authenticates producers (GitHub Actions OIDC or API key) and checks route access. */
@@ -58,13 +60,15 @@ export class ProducerAuthService {
 
   /**
    * 403 unless the route lists this producer in `allowed_sources`. Admins may test any
-   * route, and a hook may send to the one route an admin bound it to.
+   * route, a hook may send to the one route an admin bound it to, and the built-in route
+   * takes the API keys that were given it.
    */
   assertAllowed(route: Route, producer: Producer): void {
     const { github_repos, api_keys } = route.allowed_sources;
     const source = producer.source;
     const allowed =
       source.type === "admin_test" ||
+      (route.id === DIRECT_ROUTE.id && producer.direct === true) ||
       (source.type === "hook" && source.routeId === route.id) ||
       (source.type === "github_oidc" &&
         github_repos.some((r) => r.toLowerCase() === source.repository.toLowerCase())) ||
@@ -106,6 +110,7 @@ export class ProducerAuthService {
       tenantId: key.tenantId,
       source: { type: "api_key", apiKeyId: key.id, apiKeyName: key.name },
       label: `API key "${key.name}"`,
+      direct: key.direct,
     };
   }
 

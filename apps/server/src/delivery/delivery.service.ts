@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import {
-  ownValue,
+  findRoute,
   splitRecipients,
   type Config,
   type Ref,
@@ -104,7 +104,7 @@ export class DeliveryService {
   ): Promise<NotificationStatus> {
     const notificationId = notification.id;
     const config = (await this.configs.getVersion(notification.configVersionId))?.config;
-    const route = config && ownValue(config.routes, notification.routeId);
+    const route = config && findRoute(config, notification.routeId);
     let rows = await this.deliveriesOf(notificationId);
     if (!config || !route) {
       return this.finish(notification, rows, "Route no longer exists in the config version");
@@ -178,14 +178,15 @@ export class DeliveryService {
   ): Promise<Delivery[]> {
     const targets = routeTargets(route, config, this.channels, places);
     // Unmapped recipients are counted once per notification, not per retry.
-    for (const provider of new Set(targets.map((t) => t.provider))) {
-      const resolution = await this.resolver.resolve(
-        notification.tenantId,
-        config,
-        recipients,
-        provider,
-      );
-      if (route.mentions !== "none") {
+    const counted = new Set<ChannelId>();
+    if (route.mentions !== "none") {
+      for (const provider of new Set(targets.map((t) => t.provider))) {
+        const resolution = await this.resolver.resolve(
+          notification.tenantId,
+          config,
+          recipients,
+          provider,
+        );
         await this.resolver.recordUnmapped(
           notification.tenantId,
           resolution.unmapped,
@@ -193,10 +194,24 @@ export class DeliveryService {
           route.id,
           resolution.reasons,
         );
+        counted.add(provider);
       }
     }
-    if (route.dm)
-      targets.push(...(await this.dmTargets(notification.tenantId, route, config, recipients)));
+    if (route.dm) {
+      const personal = await this.dmTargets(notification.tenantId, route, config, recipients);
+      targets.push(...personal.targets);
+      // Someone with no account anywhere got no copy: an admin has to see that.
+      for (const channel of this.channels.all()) {
+        if (counted.has(channel.id)) continue;
+        await this.resolver.recordUnmapped(
+          notification.tenantId,
+          personal.unreached,
+          channel.id,
+          route.id,
+          personal.reasons,
+        );
+      }
+    }
     if (targets.length === 0) targets.push(...defaultTargets(route, config, this.channels));
     if (targets.length === 0) return [];
     return this.db
@@ -221,11 +236,16 @@ export class DeliveryService {
     route: Route,
     config: Config,
     recipients: Ref[],
-  ): Promise<Target[]> {
+  ): Promise<{ targets: Target[]; unreached: Ref[]; reasons: Map<Ref, string> }> {
     const channelIds = this.channels.all().map((c) => c.id);
     const accounts = new Map<string, Map<ChannelId, string>>();
+    // Recipients that no channel can reach, and why.
+    let unreached = new Set(recipients);
+    const reasons = new Map<Ref, string>();
     for (const channelId of channelIds) {
       const resolution = await this.resolver.resolve(tenantId, config, recipients, channelId);
+      unreached = new Set(resolution.unmapped.filter((ref) => unreached.has(ref)));
+      for (const [ref, reason] of resolution.reasons) reasons.set(ref, reason);
       for (const person of resolution.refs.flatMap((r) => r.persons)) {
         const ids = accounts.get(person.personId) ?? new Map<ChannelId, string>();
         if (person.target) ids.set(channelId, person.target.externalId);
@@ -240,7 +260,7 @@ export class DeliveryService {
       const provider = [pref.dmChannel, ...channelIds].find((id) => ids.has(id));
       if (provider) targets.push(personalTarget(provider, ids.get(provider)!));
     }
-    return targets;
+    return { targets, unreached: [...unreached], reasons };
   }
 
   /** Renders once per channel per attempt; template errors become permanent failures. */

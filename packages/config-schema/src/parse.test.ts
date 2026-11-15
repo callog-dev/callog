@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseConfigTree, type ConfigTree, type ParseResult } from "./parse";
+import {
+  DIRECT_ROUTE,
+  findRoute,
+  parseConfigTree,
+  type ConfigTree,
+  type ParseResult,
+} from "./parse";
 import { splitRecipients } from "./refs";
 import { loadFixture } from "./test-utils";
 
@@ -227,6 +233,18 @@ recipients: ["githb:octocat", "place:nowhere", "github:{{ data.x }}", "team:sre"
       );
       expect(errors[0]).toMatchObject({ file: "places.yaml", path: ["places", "a"] });
     });
+  });
+
+  it("keeps the built-in route out of the config", () => {
+    const errors = errorsOf(parseConfigTree({ "routes/direct.yaml": minimalRoute("direct") }));
+    expect(errors).toEqual([
+      { file: "routes/direct.yaml", path: ["id"], message: '"direct" is a built-in route' },
+    ]);
+    const config = parseConfigTree({ "routes/a.yaml": minimalRoute("a") });
+    if (!config.ok) throw new Error(JSON.stringify(config.errors));
+    expect(findRoute(config.config, "a")?.id).toBe("a");
+    expect(findRoute(config.config, "direct")).toBe(DIRECT_ROUTE);
+    expect(findRoute(config.config, "constructor")).toBeUndefined();
   });
 
   it("reads the grouping window as seconds", () => {

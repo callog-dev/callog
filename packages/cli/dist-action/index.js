@@ -37971,7 +37971,9 @@ var require_parse3 = __commonJS({
   "../config-schema/dist/parse.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.DIRECT_ROUTE = void 0;
     exports2.ownValue = ownValue2;
+    exports2.findRoute = findRoute;
     exports2.parseConfigTree = parseConfigTree;
     var yaml_1 = require_dist2();
     var data_schema_1 = require_data_schema();
@@ -37979,6 +37981,25 @@ var require_parse3 = __commonJS({
     var schemas_1 = require_schemas3();
     function ownValue2(record, key) {
       return Object.hasOwn(record, key) ? record[key] : void 0;
+    }
+    exports2.DIRECT_ROUTE = {
+      id: "direct",
+      description: "Plain text to the recipients the sender names",
+      allowed_sources: { github_repos: [], api_keys: [] },
+      destinations: [],
+      recipients: [],
+      mentions: "none",
+      dm: true,
+      schema: {
+        type: "object",
+        required: ["text"],
+        properties: { text: { type: "string", minLength: 1 } }
+      },
+      template: [{ text: "{{ data.text }}" }],
+      examples: []
+    };
+    function findRoute(config, id) {
+      return id === exports2.DIRECT_ROUTE.id ? exports2.DIRECT_ROUTE : ownValue2(config.routes, id);
     }
     var ROOT_FILES = ["config.yaml", "teams.yaml", "places.yaml"];
     var ROUTE_FILE = /^routes\/([^/]+)\.ya?ml$/;
@@ -38008,6 +38029,10 @@ var require_parse3 = __commonJS({
           continue;
         if (route.id !== match[1]) {
           errors.push({ file, path: ["id"], message: `must match the file name "${match[1]}"` });
+          continue;
+        }
+        if (route.id === exports2.DIRECT_ROUTE.id) {
+          errors.push({ file, path: ["id"], message: `"${route.id}" is a built-in route` });
           continue;
         }
         const defined = ownValue2(routeFiles, route.id);
