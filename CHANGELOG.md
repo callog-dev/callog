@@ -6,6 +6,21 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** a route describes its message with `template` only. The `slack_blocks` key is
+  gone, and the `buttons` block is now `actions`.
+- Every channel shows every block: a block a channel cannot draw is sent as text in that
+  channel's formatting.
+- A mention in a `header` or in the text of an action is written as the person's name.
+
+### Operator actions
+
+- In the config repo, rename `buttons:` to `actions:` in route templates and rewrite routes
+  that use `slack_blocks` with `template` blocks. `notify validate` reports both.
+
 ## [0.4.0]
 
 ### Added

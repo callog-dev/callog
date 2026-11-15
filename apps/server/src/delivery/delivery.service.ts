@@ -208,10 +208,7 @@ export class DeliveryService {
     config: Config,
     recipients: Ref[],
   ): Promise<Target[]> {
-    const channelIds = this.channels
-      .all()
-      .filter((c) => c.canRender(route))
-      .map((c) => c.id);
+    const channelIds = this.channels.all().map((c) => c.id);
     const accounts = new Map<string, Map<ChannelId, string>>();
     for (const channelId of channelIds) {
       const resolution = await this.resolver.resolve(tenantId, config, recipients, channelId);

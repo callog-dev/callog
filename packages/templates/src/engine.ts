@@ -49,7 +49,7 @@ export function renderAt(path: (string | number)[], render: () => string): strin
   }
 }
 
-/** URLs that come from data must be http(s) (buttons and markdown links). */
+/** URLs that come from data must be http(s) (actions and markdown links). */
 export const HTTP_URL = /^https?:\/\/\S+$/i;
 /** Private Use Area characters markdown.ts uses as placeholders; never taken from data. */
 const PLACEHOLDER_CHARS = /[\uE000-\uE004]/g;

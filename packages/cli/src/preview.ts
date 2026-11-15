@@ -49,7 +49,7 @@ function routeSection(route: Route, config: Config, file?: string): string[] {
   lines.push(`**From:** ${sources.join(", ")}`, "");
 
   const examples = route.examples.length > 0 ? route.examples : [{ data: {}, recipients: [] }];
-  const toTelegram = route.template && reachesTelegram(route, config);
+  const toTelegram = reachesTelegram(route, config);
   examples.forEach((example, i) => {
     if (route.examples.length > 1) lines.push(`#### Example ${i + 1}`, "");
     try {
@@ -142,16 +142,13 @@ export function slackBlocksToMarkdown(blocks: SlackBlock[]): string {
         break;
       case "actions":
         out.push(
-          ((block.elements as { text: { text: string }; url?: string }[]) ?? [])
-            .map((b) => `[\`${b.text.text}\`](${b.url ?? "#"})`)
+          ((block.elements as { text: { text: string }; url: string }[]) ?? [])
+            .map((b) => `[\`${b.text.text}\`](${b.url})`)
             .join(" "),
         );
         break;
       case "divider":
         out.push("———");
-        break;
-      default:
-        out.push(`_(${block.type} block)_`);
     }
   }
   return out.join("\n\n");

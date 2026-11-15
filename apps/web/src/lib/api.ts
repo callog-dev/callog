@@ -51,7 +51,6 @@ export interface RouteSummary {
 /** `GET /api/routes/:id`; the extra fields come only for admins. */
 export interface RouteDetails extends RouteSummary {
   template?: unknown;
-  slackBlocks?: unknown;
   examples?: { data?: Record<string, unknown>; recipients?: string[] }[];
   schema?: unknown;
 }

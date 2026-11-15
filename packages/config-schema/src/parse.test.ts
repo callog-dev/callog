@@ -97,7 +97,7 @@ template: [{ text: hi }]`;
     expect(errors[0]).toMatchObject({ file: "routes/a.yaml", path: ["allowed_sources"] });
   });
 
-  it("requires template or slack_blocks", () => {
+  it("requires a template", () => {
     const route = `
 id: a
 allowed_sources: { api_keys: [ci] }
@@ -122,14 +122,13 @@ destinations: [{ slack: "#x" }]`;
     ]);
   });
 
-  it("requires a neutral template when the route reaches Telegram", () => {
-    const route = `
-id: a
-allowed_sources: { api_keys: [ci] }
-destinations: [{ telegram: chat }]
-slack_blocks: [{ type: section }]`;
-    const errors = errorsOf(parseConfigTree({ "routes/a.yaml": route }));
-    expect(errors[0]?.message).toContain("Telegram destination requires template");
+  it("rejects raw Slack blocks", () => {
+    const errors = errorsOf(
+      parseConfigTree({
+        "routes/a.yaml": minimalRoute("a", "slack_blocks: [{ type: section }]"),
+      }),
+    );
+    expect(errors[0]?.message).toContain('"slack_blocks"');
   });
 
   it("rejects malformed recipient refs in examples", () => {

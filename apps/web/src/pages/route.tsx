@@ -115,7 +115,7 @@ export function RoutePage({ linked, admin }: { linked: boolean; admin: boolean }
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
-            <Code title="Template" value={r.template ?? r.slackBlocks} />
+            <Code title="Template" value={r.template} />
             {r.examples?.length ? <Code title="Examples" value={r.examples} /> : null}
           </CardContent>
         </Card>

@@ -172,9 +172,7 @@ function checkRoutes(
   for (const [id, route] of Object.entries(routes)) {
     const file = routeFiles[id]!;
     checkDataSchema(route, file, errors);
-    let needsTelegram = false;
     route.destinations.forEach((destination, i) => {
-      if ("telegram" in destination) needsTelegram = true;
       if (!("team" in destination)) return;
       const team = ownValue(teams, destination.team);
       if (!team) {
@@ -192,16 +190,7 @@ function checkRoutes(
           message: `team "${destination.team}" has neither slack_channel nor telegram_chat`,
         });
       }
-      if (team.telegram_chat) needsTelegram = true;
     });
-    // slack_blocks only render to Slack; Telegram needs the neutral template.
-    if (needsTelegram && !route.template) {
-      errors.push({
-        file,
-        path: ["template"],
-        message: "a Telegram destination requires template (slack_blocks render only to Slack)",
-      });
-    }
   }
 }
 

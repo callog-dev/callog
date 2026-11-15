@@ -37878,11 +37878,12 @@ var require_schemas3 = __commonJS({
       zod_1.z.strictObject({
         fields: zod_1.z.array(zod_1.z.strictObject({ label: zod_1.z.string().min(1), value: zod_1.z.string() })).min(1)
       }),
-      zod_1.z.strictObject({
-        buttons: zod_1.z.array(zod_1.z.strictObject({ text: zod_1.z.string().min(1), url: zod_1.z.string().min(1) })).min(1)
-      }),
       zod_1.z.strictObject({ context: zod_1.z.string().min(1) }),
-      zod_1.z.strictObject({ divider: zod_1.z.literal(true) })
+      zod_1.z.strictObject({ divider: zod_1.z.literal(true) }),
+      /** Link buttons. */
+      zod_1.z.strictObject({
+        actions: zod_1.z.array(zod_1.z.strictObject({ text: zod_1.z.string().min(1), url: zod_1.z.string().min(1) })).min(1)
+      })
     ]);
     exports2.destinationSchema = zod_1.z.union([
       zod_1.z.strictObject({ slack: zod_1.z.string().min(1) }),
@@ -37908,16 +37909,11 @@ var require_schemas3 = __commonJS({
       dm: zod_1.z.boolean().default(false),
       /** JSON Schema for `data`; compiled and enforced by the API. */
       schema: zod_1.z.record(zod_1.z.string(), zod_1.z.unknown()).optional(),
-      template: zod_1.z.array(exports2.blockSchema).min(1).optional(),
-      /** Escape hatch: raw Slack Block Kit, Liquid applied to strings. */
-      slack_blocks: zod_1.z.array(zod_1.z.record(zod_1.z.string(), zod_1.z.unknown())).min(1).optional(),
+      template: zod_1.z.array(exports2.blockSchema).min(1),
       examples: zod_1.z.array(zod_1.z.strictObject({
         data: zod_1.z.record(zod_1.z.string(), zod_1.z.unknown()).default({}),
         recipients: zod_1.z.array(recipientRefSchema).default([])
       })).default([])
-    }).refine((r) => r.template !== void 0 || r.slack_blocks !== void 0, {
-      message: "either template or slack_blocks is required",
-      path: ["template"]
     });
   }
 });
@@ -38038,10 +38034,7 @@ var require_parse3 = __commonJS({
       for (const [id, route] of Object.entries(routes)) {
         const file = routeFiles[id];
         checkDataSchema(route, file, errors);
-        let needsTelegram = false;
         route.destinations.forEach((destination, i) => {
-          if ("telegram" in destination)
-            needsTelegram = true;
           if (!("team" in destination))
             return;
           const team = ownValue2(teams, destination.team);
@@ -38060,16 +38053,7 @@ var require_parse3 = __commonJS({
               message: `team "${destination.team}" has neither slack_channel nor telegram_chat`
             });
           }
-          if (team.telegram_chat)
-            needsTelegram = true;
         });
-        if (needsTelegram && !route.template) {
-          errors.push({
-            file,
-            path: ["template"],
-            message: "a Telegram destination requires template (slack_blocks render only to Slack)"
-          });
-        }
       }
     }
     function checkDataSchema(route, file, errors) {
@@ -43137,8 +43121,8 @@ var require_markdown = __commonJS({
   "../templates/dist/markdown.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.safeLinkUrl = safeLinkUrl;
     exports2.renderMarkdown = renderMarkdown;
-    exports2.escapeLiterals = escapeLiterals;
     var engine_1 = require_engine();
     var LIQUID_TAG = /\{\{[\s\S]*?\}\}|\{%[\s\S]*?%\}/g;
     var PLACEHOLDER = /\uE000(\d+)\uE000/g;
@@ -43163,15 +43147,109 @@ var require_markdown = __commonJS({
     }
     function finishLinks(rendered, target) {
       return rendered.replace(PENDING_LINK, (_, url, text) => {
-        const safe = url.trim().replace(/"/g, "%22").replace(/\|/g, "%7C");
+        const safe = safeLinkUrl(url.trim());
         return engine_1.HTTP_URL.test(safe) ? target.link(text, safe) : text;
       });
+    }
+    var LINK_BREAKERS = { '"': "%22", "|": "%7C", "<": "%3C", ">": "%3E" };
+    function safeLinkUrl(url) {
+      return url.replace(/["|<>]/g, (char) => LINK_BREAKERS[char]);
     }
     function renderMarkdown(engine, source, target, ctx) {
       return finishLinks((0, engine_1.renderString)(engine, convertMarkdown(source, target), ctx), target);
     }
-    function escapeLiterals(source, escape2) {
-      return outsideLiquid(source, escape2);
+  }
+});
+
+// ../templates/dist/blocks.js
+var require_blocks = __commonJS({
+  "../templates/dist/blocks.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.BLOCK_TYPES = void 0;
+    exports2.renderBlocks = renderBlocks;
+    var engine_1 = require_engine();
+    var markdown_1 = require_markdown();
+    exports2.BLOCK_TYPES = [
+      "header",
+      "text",
+      "fields",
+      "context",
+      "divider",
+      "actions"
+    ];
+    function renderBlocks(route, input, { target, native, limits = {}, mention }) {
+      const unmapped = /* @__PURE__ */ new Set();
+      const ctx = { ...input, route: { id: route.id } };
+      const formatted = (0, engine_1.createEngine)({
+        escape: target.escape,
+        mention: route.mentions === "none" ? void 0 : mention,
+        unmapped
+      });
+      const unformatted = (0, engine_1.createEngine)({
+        escape: (text) => text,
+        mention: void 0,
+        unmapped: /* @__PURE__ */ new Set()
+      });
+      const render = {
+        markup: (path4, source) => (0, engine_1.renderAt)(path4, () => (0, markdown_1.renderMarkdown)(formatted, source, target, ctx)),
+        plain: (path4, source) => (0, engine_1.renderAt)(path4, () => (0, engine_1.renderString)(unformatted, source, ctx))
+      };
+      const isNative = (block) => native.includes(block.type);
+      const blocks = route.template.map((block, i) => {
+        const rendered = renderBlock(block, ["template", i], render, limits);
+        return isNative(rendered) ? rendered : { type: "text", text: blockAsText(rendered, target) };
+      });
+      return { message: blocks, unmapped: [...unmapped] };
+    }
+    function renderBlock(block, path4, render, limits) {
+      if ("header" in block) {
+        return { type: "header", text: render.plain([...path4, "header"], block.header) };
+      }
+      if ("text" in block) {
+        return { type: "text", text: render.markup([...path4, "text"], block.text) };
+      }
+      if ("fields" in block) {
+        return {
+          type: "fields",
+          fields: block.fields.slice(0, limits.fields).map((field, i) => ({
+            label: field.label,
+            value: render.markup([...path4, "fields", i, "value"], field.value)
+          }))
+        };
+      }
+      if ("context" in block) {
+        return { type: "context", text: render.markup([...path4, "context"], block.context) };
+      }
+      if ("actions" in block) {
+        return {
+          type: "actions",
+          actions: block.actions.slice(0, limits.actions).map((action, i) => {
+            const urlPath = [...path4, "actions", i, "url"];
+            return {
+              text: render.plain([...path4, "actions", i, "text"], action.text),
+              url: (0, engine_1.httpUrl)(urlPath, render.plain(urlPath, action.url))
+            };
+          })
+        };
+      }
+      return { type: "divider" };
+    }
+    function blockAsText(block, target) {
+      switch (block.type) {
+        case "header":
+          return target.bold(target.escape(block.text));
+        case "text":
+          return block.text;
+        case "fields":
+          return block.fields.map((field) => `${target.bold(target.escape(`${field.label}:`))} ${field.value}`).join("\n");
+        case "context":
+          return target.italic(block.text);
+        case "divider":
+          return "\u2014\u2014\u2014";
+        case "actions":
+          return block.actions.map((action) => target.link(target.escape(action.text), (0, markdown_1.safeLinkUrl)(action.url))).join(" \xB7 ");
+      }
     }
   }
 });
@@ -43183,8 +43261,8 @@ var require_slack = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.escapeSlack = escapeSlack;
     exports2.renderSlack = renderSlack2;
+    var blocks_1 = require_blocks();
     var engine_1 = require_engine();
-    var markdown_1 = require_markdown();
     function escapeSlack(text) {
       return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
@@ -43199,99 +43277,64 @@ var require_slack = __commonJS({
     var MAX_HEADER = 150;
     var MAX_TEXT = 3e3;
     var MAX_FIELDS = 10;
-    var MAX_BUTTONS = 25;
-    var MAX_BUTTON_TEXT = 75;
+    var MAX_FIELD_TEXT = 2e3;
+    var MAX_ACTIONS = 25;
+    var MAX_ACTION_TEXT = 75;
     var MAX_BLOCKS = 50;
     function renderSlack2(route, input, options = {}) {
-      const unmapped = /* @__PURE__ */ new Set();
-      const mention = route.mentions === "none" ? void 0 : options.mention;
-      const escaped = (0, engine_1.createEngine)({ escape: escapeSlack, mention, unmapped });
-      const plain = (0, engine_1.createEngine)({ escape: (s) => s, mention, unmapped });
-      const ctx = { ...input, route: { id: route.id } };
-      const mrkdwn2 = (path4, source) => (0, engine_1.renderAt)(path4, () => (0, markdown_1.renderMarkdown)(escaped, source, slackMarkdown, ctx));
-      const plainText = (path4, source) => (0, engine_1.renderAt)(path4, () => (0, engine_1.renderString)(plain, source, ctx));
-      let blocks;
-      if (route.slack_blocks) {
-        blocks = route.slack_blocks.map((block, i) => renderDeep(block, (s, p) => (0, engine_1.renderAt)(["slack_blocks", i, ...p], () => (0, engine_1.renderString)(escaped, s, ctx))));
-      } else {
-        blocks = (route.template ?? []).map((block, i) => toSlackBlock(block, ["template", i], mrkdwn2, plainText));
-      }
-      if (blocks.length > MAX_BLOCKS) {
+      const { message, unmapped } = (0, blocks_1.renderBlocks)(route, input, {
+        target: slackMarkdown,
+        native: blocks_1.BLOCK_TYPES,
+        limits: { fields: MAX_FIELDS, actions: MAX_ACTIONS },
+        mention: options.mention
+      });
+      if (message.length > MAX_BLOCKS) {
         throw new engine_1.TemplateRenderError(["template"], `Slack allows at most ${MAX_BLOCKS} blocks`);
       }
-      const fallback = fallbackText(blocks, route.slack_blocks ? (t) => t : escapeSlack);
-      return { message: { text: fallback, blocks }, unmapped: [...unmapped] };
+      const blocks = message.map(toSlackBlock);
+      return { message: { text: fallbackText(blocks), blocks }, unmapped };
     }
-    function toSlackBlock(block, path4, mrkdwn2, plainText) {
-      if ("header" in block) {
-        return {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: truncate(plainText([...path4, "header"], block.header), MAX_HEADER),
-            emoji: true
-          }
-        };
-      }
-      if ("text" in block) {
-        return {
-          type: "section",
-          text: { type: "mrkdwn", text: truncate(mrkdwn2([...path4, "text"], block.text), MAX_TEXT) }
-        };
-      }
-      if ("fields" in block) {
-        return {
-          type: "section",
-          fields: block.fields.slice(0, MAX_FIELDS).map((field, i) => ({
-            type: "mrkdwn",
-            text: truncate(`*${escapeSlack(field.label)}*
-${mrkdwn2([...path4, "fields", i, "value"], field.value)}`, 2e3)
-          }))
-        };
-      }
-      if ("buttons" in block) {
-        return {
-          type: "actions",
-          elements: block.buttons.slice(0, MAX_BUTTONS).map((button, i) => {
-            const urlPath = [...path4, "buttons", i, "url"];
-            const url = (0, engine_1.httpUrl)(urlPath, plainText(urlPath, button.url));
-            return {
+    function toSlackBlock(block) {
+      switch (block.type) {
+        case "header":
+          return {
+            type: "header",
+            text: { type: "plain_text", text: truncate(block.text, MAX_HEADER), emoji: true }
+          };
+        case "text":
+          return { type: "section", text: { type: "mrkdwn", text: truncate(block.text, MAX_TEXT) } };
+        case "fields":
+          return {
+            type: "section",
+            fields: block.fields.map((field) => ({
+              type: "mrkdwn",
+              text: truncate(`*${escapeSlack(field.label)}*
+${field.value}`, MAX_FIELD_TEXT)
+            }))
+          };
+        case "context":
+          return {
+            type: "context",
+            elements: [{ type: "mrkdwn", text: truncate(block.text, MAX_TEXT) }]
+          };
+        case "divider":
+          return { type: "divider" };
+        case "actions":
+          return {
+            type: "actions",
+            elements: block.actions.map((action) => ({
               type: "button",
-              text: {
-                type: "plain_text",
-                text: truncate(plainText([...path4, "buttons", i, "text"], button.text), MAX_BUTTON_TEXT),
-                emoji: true
-              },
-              url
-            };
-          })
-        };
+              text: { type: "plain_text", text: truncate(action.text, MAX_ACTION_TEXT), emoji: true },
+              url: action.url
+            }))
+          };
       }
-      if ("context" in block) {
-        return {
-          type: "context",
-          elements: [
-            { type: "mrkdwn", text: truncate(mrkdwn2([...path4, "context"], block.context), MAX_TEXT) }
-          ]
-        };
-      }
-      return { type: "divider" };
     }
-    function renderDeep(value, render, path4 = []) {
-      if (typeof value === "string")
-        return render(value, path4);
-      if (Array.isArray(value))
-        return value.map((v, i) => renderDeep(v, render, [...path4, i]));
-      if (value && typeof value === "object") {
-        return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, renderDeep(v, render, [...path4, k])]));
-      }
-      return value;
-    }
-    function fallbackText(blocks, escapePlain) {
+    function fallbackText(blocks) {
       for (const block of blocks) {
         const { type, text } = block.text ?? {};
         if (typeof text === "string" && text.trim()) {
-          return truncate(type === "plain_text" ? escapePlain(text) : text, MAX_TEXT);
+          return truncate(type === "plain_text" ? escapeSlack(text) : text, MAX_TEXT);
         }
       }
       return "Notification";
@@ -43309,8 +43352,7 @@ var require_telegram = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.escapeTelegram = escapeTelegram;
     exports2.renderTelegram = renderTelegram2;
-    var engine_1 = require_engine();
-    var markdown_1 = require_markdown();
+    var blocks_1 = require_blocks();
     function escapeTelegram(text) {
       return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
@@ -43325,45 +43367,27 @@ var require_telegram = __commonJS({
     var MAX_TEXT = 4096;
     var BUTTONS_PER_ROW = 3;
     var MAX_BUTTON_TEXT = 64;
+    var NATIVE_BLOCKS = ["text", "actions"];
     function renderTelegram2(route, input, options = {}) {
-      if (!route.template) {
-        throw new engine_1.TemplateRenderError(["template"], "Telegram needs a template (slack_blocks are Slack-only)");
-      }
-      const unmapped = /* @__PURE__ */ new Set();
-      const mention = route.mentions === "none" ? void 0 : options.mention;
-      const escaped = (0, engine_1.createEngine)({ escape: escapeTelegram, mention, unmapped });
-      const raw = (0, engine_1.createEngine)({ escape: (s) => s, mention, unmapped });
-      const ctx = { ...input, route: { id: route.id } };
-      const html = (path4, source) => (0, engine_1.renderAt)(path4, () => (0, markdown_1.renderMarkdown)(escaped, source, telegramMarkdown, ctx));
-      const plain = (path4, source) => (0, engine_1.renderAt)(path4, () => (0, engine_1.renderString)(escaped, (0, markdown_1.escapeLiterals)(source, escapeTelegram), ctx));
-      const url = (path4, source) => (0, engine_1.httpUrl)(path4, (0, engine_1.renderAt)(path4, () => (0, engine_1.renderString)(raw, source, ctx)));
+      const { message, unmapped } = (0, blocks_1.renderBlocks)(route, input, {
+        target: telegramMarkdown,
+        native: NATIVE_BLOCKS,
+        mention: options.mention
+      });
       const parts = [];
       const buttons = [];
-      route.template.forEach((block, i) => {
-        const path4 = ["template", i];
-        if ("header" in block)
-          parts.push(`<b>${plain([...path4, "header"], block.header)}</b>`);
-        else if ("text" in block)
-          parts.push(html([...path4, "text"], block.text));
-        else if ("fields" in block) {
-          parts.push(block.fields.map((f, j) => `<b>${escapeTelegram(f.label)}:</b> ${html([...path4, "fields", j, "value"], f.value)}`).join("\n"));
-        } else if ("buttons" in block) {
-          block.buttons.forEach((b, j) => {
-            const text = (0, engine_1.renderAt)([...path4, "buttons", j, "text"], () => (0, engine_1.renderString)(raw, b.text, ctx));
-            buttons.push({
-              text: text.slice(0, MAX_BUTTON_TEXT),
-              url: url([...path4, "buttons", j, "url"], b.url)
-            });
-          });
-        } else if ("context" in block)
-          parts.push(`<i>${html([...path4, "context"], block.context)}</i>`);
-        else
-          parts.push("\u2014\u2014\u2014");
-      });
-      return {
-        message: { text: fitText(parts), buttons: chunk(buttons, BUTTONS_PER_ROW) },
-        unmapped: [...unmapped]
-      };
+      for (const block of message) {
+        switch (block.type) {
+          case "text":
+            parts.push(block.text);
+            break;
+          case "actions":
+            for (const { text, url } of block.actions) {
+              buttons.push({ text: text.slice(0, MAX_BUTTON_TEXT), url });
+            }
+        }
+      }
+      return { message: { text: fitText(parts), buttons: chunk(buttons, BUTTONS_PER_ROW) }, unmapped };
     }
     function fitText(parts) {
       const joined = parts.join("\n\n");
@@ -43410,8 +43434,7 @@ var require_validate2 = __commonJS({
       inputs.forEach((input, i) => {
         try {
           (0, slack_1.renderSlack)(route, input);
-          if (route.template)
-            (0, telegram_1.renderTelegram)(route, input);
+          (0, telegram_1.renderTelegram)(route, input);
         } catch (err) {
           if (!(err instanceof engine_1.TemplateRenderError))
             throw err;
@@ -43507,7 +43530,7 @@ function routeSection(route, config, file) {
   ];
   lines.push(`**From:** ${sources.join(", ")}`, "");
   const examples = route.examples.length > 0 ? route.examples : [{ data: {}, recipients: [] }];
-  const toTelegram = route.template && reachesTelegram(route, config);
+  const toTelegram = reachesTelegram(route, config);
   examples.forEach((example, i) => {
     if (route.examples.length > 1) lines.push(`#### Example ${i + 1}`, "");
     try {
@@ -43582,14 +43605,11 @@ function slackBlocksToMarkdown(blocks) {
         break;
       case "actions":
         out.push(
-          (block.elements ?? []).map((b) => `[\`${b.text.text}\`](${b.url ?? "#"})`).join(" ")
+          (block.elements ?? []).map((b) => `[\`${b.text.text}\`](${b.url})`).join(" ")
         );
         break;
       case "divider":
         out.push("\u2014\u2014\u2014");
-        break;
-      default:
-        out.push(`_(${block.type} block)_`);
     }
   }
   return out.join("\n\n");

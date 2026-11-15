@@ -60,11 +60,12 @@ export const blockSchema = z.union([
   z.strictObject({
     fields: z.array(z.strictObject({ label: z.string().min(1), value: z.string() })).min(1),
   }),
-  z.strictObject({
-    buttons: z.array(z.strictObject({ text: z.string().min(1), url: z.string().min(1) })).min(1),
-  }),
   z.strictObject({ context: z.string().min(1) }),
   z.strictObject({ divider: z.literal(true) }),
+  /** Link buttons. */
+  z.strictObject({
+    actions: z.array(z.strictObject({ text: z.string().min(1), url: z.string().min(1) })).min(1),
+  }),
 ]);
 export type Block = z.infer<typeof blockSchema>;
 
@@ -78,43 +79,36 @@ export type Destination = z.infer<typeof destinationSchema>;
 /** Examples are fixtures for CI and previews; they are never resolved to real people. */
 const recipientRefSchema = refSchema(["email", "github", "slack", "telegram", "team", "person"]);
 
-export const routeSchema = z
-  .strictObject({
-    id: slugSchema,
-    description: z.string().optional(),
-    allowed_sources: z
-      .strictObject({
-        github_repos: z
-          .array(z.string().regex(/^[\w.-]+\/[\w.-]+$/, "must be owner/repo"))
-          .default([]),
-        api_keys: z.array(z.string().min(1)).default([]),
-      })
-      .refine((s) => s.github_repos.length + s.api_keys.length > 0, {
-        message: "at least one github_repos or api_keys entry is required",
+export const routeSchema = z.strictObject({
+  id: slugSchema,
+  description: z.string().optional(),
+  allowed_sources: z
+    .strictObject({
+      github_repos: z
+        .array(z.string().regex(/^[\w.-]+\/[\w.-]+$/, "must be owner/repo"))
+        .default([]),
+      api_keys: z.array(z.string().min(1)).default([]),
+    })
+    .refine((s) => s.github_repos.length + s.api_keys.length > 0, {
+      message: "at least one github_repos or api_keys entry is required",
+    }),
+  destinations: z.array(destinationSchema).min(1),
+  mentions: z.enum(["recipients", "none"]).default("recipients"),
+  /**
+   * Also send each recipient a personal copy in their preferred channel (Slack or
+   * Telegram, `/notify prefs`). People can mute a route's DMs for themselves.
+   */
+  dm: z.boolean().default(false),
+  /** JSON Schema for `data`; compiled and enforced by the API. */
+  schema: z.record(z.string(), z.unknown()).optional(),
+  template: z.array(blockSchema).min(1),
+  examples: z
+    .array(
+      z.strictObject({
+        data: z.record(z.string(), z.unknown()).default({}),
+        recipients: z.array(recipientRefSchema).default([]),
       }),
-    destinations: z.array(destinationSchema).min(1),
-    mentions: z.enum(["recipients", "none"]).default("recipients"),
-    /**
-     * Also send each recipient a personal copy in their preferred channel (Slack or
-     * Telegram, `/notify prefs`). People can mute a route's DMs for themselves.
-     */
-    dm: z.boolean().default(false),
-    /** JSON Schema for `data`; compiled and enforced by the API. */
-    schema: z.record(z.string(), z.unknown()).optional(),
-    template: z.array(blockSchema).min(1).optional(),
-    /** Escape hatch: raw Slack Block Kit, Liquid applied to strings. */
-    slack_blocks: z.array(z.record(z.string(), z.unknown())).min(1).optional(),
-    examples: z
-      .array(
-        z.strictObject({
-          data: z.record(z.string(), z.unknown()).default({}),
-          recipients: z.array(recipientRefSchema).default([]),
-        }),
-      )
-      .default([]),
-  })
-  .refine((r) => r.template !== undefined || r.slack_blocks !== undefined, {
-    message: "either template or slack_blocks is required",
-    path: ["template"],
-  });
+    )
+    .default([]),
+});
 export type Route = z.infer<typeof routeSchema>;

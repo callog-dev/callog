@@ -24,8 +24,7 @@ export function validateRouteTemplates(route: Route): TemplateIssue[] {
   inputs.forEach((input, i) => {
     try {
       renderSlack(route, input);
-      // Without a neutral template the route cannot target Telegram (config-schema enforces it).
-      if (route.template) renderTelegram(route, input);
+      renderTelegram(route, input);
     } catch (err) {
       if (!(err instanceof TemplateRenderError)) throw err;
       const prefix = route.examples.length > 0 ? `example ${i}: ` : "";

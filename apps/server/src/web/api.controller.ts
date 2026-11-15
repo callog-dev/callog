@@ -121,8 +121,7 @@ export class ApiController {
     if (!isAdmin) return summary;
     return {
       ...summary,
-      template: route.template ?? null,
-      slackBlocks: route.slack_blocks ?? null,
+      template: route.template,
       examples: route.examples,
       schema: route.schema ?? null,
     };

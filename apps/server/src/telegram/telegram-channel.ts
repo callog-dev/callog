@@ -30,11 +30,6 @@ export class TelegramChannel implements Channel<"telegram", TelegramMessage> {
     return to.id.startsWith("-") || to.id.startsWith("@") ? 3100 : 1100;
   }
 
-  /** Raw Slack blocks cannot be shown in Telegram. */
-  canRender(route: Route): boolean {
-    return route.template !== undefined;
-  }
-
   render(route: Route, input: RenderInput, mention: MentionResolver): TelegramMessage {
     return renderTelegram(route, input, { mention }).message;
   }

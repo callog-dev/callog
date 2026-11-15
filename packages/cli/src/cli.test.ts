@@ -23,7 +23,7 @@ const BROKEN_ROUTE = `
 id: broken
 allowed_sources: { api_keys: [ci] }
 destinations: [{ team: ghosts }]
-template: [{ buttons: [{ text: Go, url: "{{ data.u }}" }] }]
+template: [{ actions: [{ text: Go, url: "{{ data.u }}" }] }]
 examples: [{ data: { u: "not a url" } }]
 `;
 
@@ -55,7 +55,7 @@ describe("notify validate", () => {
     expect(report.errors).toEqual([
       {
         file: "routes/broken.yaml",
-        path: ["template", 0, "buttons", 0, "url"],
+        path: ["template", 0, "actions", 0, "url"],
         message: 'example 0: rendered URL must be http(s), got "not a url"',
       },
     ]);

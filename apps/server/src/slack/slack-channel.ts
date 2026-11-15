@@ -43,10 +43,6 @@ export class SlackChannel implements Channel<"slack", SlackMessage> {
     return 1100;
   }
 
-  canRender(): boolean {
-    return true;
-  }
-
   render(route: Route, input: RenderInput, mention: MentionResolver): SlackMessage {
     return renderSlack(route, input, { mention }).message;
   }

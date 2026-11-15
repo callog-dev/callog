@@ -48,9 +48,6 @@ export interface Channel<Id extends ChannelId = ChannelId, Message = unknown> {
   /** Minimum gap between two messages to the destination, in milliseconds. */
   minIntervalMs(to: Destination): number;
 
-  /** Whether the route describes a message this channel can show. */
-  canRender(route: Route): boolean;
-
   /** Throws `TemplateRenderError` on a broken template. */
   render(route: Route, input: RenderInput, mention: MentionResolver): Message;
 

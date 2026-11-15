@@ -220,7 +220,7 @@ destinations: [{ telegram: "${GROUP}" }]
 template:
   - header: "Failed on {{ data.branch }}"
   - text: "by {{ recipients | mention }}"
-  - buttons: [{ text: Run, url: "https://ci.example/1" }]`;
+  - actions: [{ text: Run, url: "https://ci.example/1" }]`;
 
     const notificationFor = async (recipients: string[]) => {
       await connect();

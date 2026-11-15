@@ -222,7 +222,7 @@ template: [{ text: hi }]`);
 id: r
 allowed_sources: { api_keys: [ci] }
 destinations: [{ slack: "#alerts" }]
-template: [{ buttons: [{ text: Go, url: "{{ data.branch }}" }] }]`);
+template: [{ actions: [{ text: Go, url: "{{ data.branch }}" }] }]`);
     const id = await createNotification([]);
 
     expect(await service.deliver(id, { attempt: 1, maxAttempts: 8 })).toBe("failed");

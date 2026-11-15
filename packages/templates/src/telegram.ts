@@ -1,16 +1,7 @@
-import type { Block, Ref, Route } from "@callog/config-schema";
-import {
-  createEngine,
-  httpUrl,
-  renderAt,
-  renderString,
-  TemplateRenderError,
-  type MentionResolver,
-  type RenderContext,
-  type RenderInput,
-  type RenderResult,
-} from "./engine";
-import { escapeLiterals, renderMarkdown, type MarkdownTarget } from "./markdown";
+import type { Route } from "@callog/config-schema";
+import { renderBlocks } from "./blocks";
+import type { MentionResolver, RenderInput, RenderResult } from "./engine";
+import type { MarkdownTarget } from "./markdown";
 
 /** Telegram HTML parse mode needs only these escaped (core.telegram.org/bots/api#html-style). */
 export function escapeTelegram(text: string): string {
@@ -46,71 +37,34 @@ export interface TelegramRenderOptions {
   mention?: MentionResolver;
 }
 
-/**
- * Renders a route's neutral template to a Telegram HTML message. Raw
- * `slack_blocks` are Slack-only; config validation requires `template` for Telegram.
- */
+/** Telegram has text and an inline keyboard; every other block arrives as text. */
+const NATIVE_BLOCKS = ["text", "actions"] as const;
+
+/** Renders a route's template to a Telegram HTML message. */
 export function renderTelegram(
   route: Route,
   input: RenderInput,
   options: TelegramRenderOptions = {},
 ): RenderResult<TelegramMessage> {
-  if (!route.template) {
-    throw new TemplateRenderError(
-      ["template"],
-      "Telegram needs a template (slack_blocks are Slack-only)",
-    );
-  }
-  const unmapped = new Set<Ref>();
-  const mention = route.mentions === "none" ? undefined : options.mention;
-  const escaped = createEngine({ escape: escapeTelegram, mention, unmapped });
-  const raw = createEngine({ escape: (s) => s, mention, unmapped });
-  const ctx: RenderContext = { ...input, route: { id: route.id } };
-
-  const html = (path: (string | number)[], source: string) =>
-    renderAt(path, () => renderMarkdown(escaped, source, telegramMarkdown, ctx));
-  const plain = (path: (string | number)[], source: string) =>
-    renderAt(path, () => renderString(escaped, escapeLiterals(source, escapeTelegram), ctx));
-  const url = (path: (string | number)[], source: string) =>
-    httpUrl(
-      path,
-      renderAt(path, () => renderString(raw, source, ctx)),
-    );
-
+  const { message, unmapped } = renderBlocks(route, input, {
+    target: telegramMarkdown,
+    native: NATIVE_BLOCKS,
+    mention: options.mention,
+  });
   const parts: string[] = [];
   const buttons: TelegramButton[] = [];
-  route.template.forEach((block: Block, i) => {
-    const path = ["template", i];
-    if ("header" in block) parts.push(`<b>${plain([...path, "header"], block.header)}</b>`);
-    else if ("text" in block) parts.push(html([...path, "text"], block.text));
-    else if ("fields" in block) {
-      parts.push(
-        block.fields
-          .map(
-            (f, j) =>
-              `<b>${escapeTelegram(f.label)}:</b> ${html([...path, "fields", j, "value"], f.value)}`,
-          )
-          .join("\n"),
-      );
-    } else if ("buttons" in block) {
-      block.buttons.forEach((b, j) => {
-        const text = renderAt([...path, "buttons", j, "text"], () =>
-          renderString(raw, b.text, ctx),
-        );
-        buttons.push({
-          text: text.slice(0, MAX_BUTTON_TEXT),
-          url: url([...path, "buttons", j, "url"], b.url),
-        });
-      });
-    } else if ("context" in block)
-      parts.push(`<i>${html([...path, "context"], block.context)}</i>`);
-    else parts.push("———");
-  });
-
-  return {
-    message: { text: fitText(parts), buttons: chunk(buttons, BUTTONS_PER_ROW) },
-    unmapped: [...unmapped],
-  };
+  for (const block of message) {
+    switch (block.type) {
+      case "text":
+        parts.push(block.text);
+        break;
+      case "actions":
+        for (const { text, url } of block.actions) {
+          buttons.push({ text: text.slice(0, MAX_BUTTON_TEXT), url });
+        }
+    }
+  }
+  return { message: { text: fitText(parts), buttons: chunk(buttons, BUTTONS_PER_ROW) }, unmapped };
 }
 
 /** Drops trailing blocks rather than cutting HTML mid-tag when over Telegram's limit. */

@@ -185,18 +185,8 @@ describe("renderSlack", () => {
     expect(message.blocks[0]).toMatchObject({ text: { text: "octocat" } });
   });
 
-  it("applies Liquid with escaping to raw slack_blocks", () => {
-    const r = route({
-      slack_blocks: [{ type: "section", text: { type: "mrkdwn", text: "*{{ data.x }}*" } }],
-    });
-    const { message } = renderSlack(r, { data: { x: "<b>" }, recipients: [] });
-    expect(message.blocks).toEqual([
-      { type: "section", text: { type: "mrkdwn", text: "*&lt;b&gt;*" } },
-    ]);
-  });
-
   it("rejects non-http button URLs", () => {
-    const r = route({ template: [{ buttons: [{ text: "Go", url: "{{ data.u }}" }] }] });
+    const r = route({ template: [{ actions: [{ text: "Go", url: "{{ data.u }}" }] }] });
     expect(() => renderSlack(r, { data: { u: "javascript:alert(1)" }, recipients: [] })).toThrow(
       TemplateRenderError,
     );
@@ -239,12 +229,12 @@ describe("renderSlack", () => {
 describe("validateRouteTemplates", () => {
   it("reports render errors per example with the block path", () => {
     const r = route({
-      template: [{ text: "ok" }, { buttons: [{ text: "Go", url: "{{ data.u }}" }] }],
+      template: [{ text: "ok" }, { actions: [{ text: "Go", url: "{{ data.u }}" }] }],
       examples: [{ data: { u: "https://ok.dev" } }, { data: { u: "nope" } }],
     });
     expect(validateRouteTemplates(r)).toEqual([
       {
-        path: ["template", 1, "buttons", 0, "url"],
+        path: ["template", 1, "actions", 0, "url"],
         message: 'example 1: rendered URL must be http(s), got "nope"',
       },
     ]);
