@@ -132,11 +132,14 @@ describe("personal copies and preferences (integration)", () => {
     expect(telegram.sent.map((s) => s.chatId).sort()).toEqual(["42", "43"]);
   });
 
-  it("mute skips the personal copy but keeps the channel mention", async () => {
-    expect(await notify("prefs mute r", "UB")).toContain("Muted personal copies of `r`");
+  it("mute skips the personal copy and names the person without a mention", async () => {
+    expect(await notify("prefs mute r", "UB")).toContain("Muted `r`");
 
-    expect(await deliver("r", ["github:bob"])).toEqual(["slack #alerts sent"]);
-    expect(slack.posted[0]!.message.text).toContain("<@UB>");
+    expect(await deliver("r", ["github:bob", "github:alice"])).toEqual([
+      "slack #alerts sent",
+      "slack dm:UA sent",
+    ]);
+    expect(slack.posted[0]!.message.text).toBe("e2e failed bob, <@UA>");
 
     await notify("prefs unmute r", "UB");
     expect(await deliver("r", ["github:bob"])).toContain("slack dm:UB sent");

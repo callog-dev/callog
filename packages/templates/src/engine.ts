@@ -20,6 +20,8 @@ export type MentionResolver = (ref: Ref) => string | readonly string[] | undefin
 export interface RenderInput {
   data: Record<string, unknown>;
   recipients: Ref[];
+  /** Names of the people a message stands for, when it is posted in place of their copies. */
+  fallback_for?: string[];
 }
 
 export interface RenderResult<M> {

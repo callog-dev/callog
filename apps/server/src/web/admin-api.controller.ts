@@ -329,12 +329,15 @@ export class AdminApiController {
       update: n.update,
       createdAt: n.createdAt,
       deliveries: ds.map((d) => ({
+        id: d.id,
         provider: d.provider,
         destination: d.destination,
         status: d.status,
         attempts: d.attempts,
         lastError: d.lastError,
         sentAt: d.sentAt,
+        forPeople: d.forPeople,
+        fallbackTo: d.fallbackTo,
       })),
     };
   }

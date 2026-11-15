@@ -29,8 +29,19 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 - A route without `destinations` names a `default_place`: where a notification is posted when
   it reaches nobody else — its recipients name no place and get no personal copy.
 
+- A personal copy that cannot be delivered — the messenger refuses it, or the attempts run
+  out — is sent another way: in the person's other messenger, then in the room of the team
+  they were named through, then in the route's `default_place`, with a line saying whom the
+  post is for. People with no account in any messenger start at the room; a team with nobody
+  to write to is posted to its room.
+- Recipients of a route with personal copies who have no account in any messenger show up
+  among the unmapped recipients.
+
 ### Changed
 
+- Muting a route now also stops its mentions. A Slack user group with a member who muted the
+  route is mentioned member by member, without that person.
+- Retrying a notification leaves alone the deliveries that another one took over.
 - **Breaking:** a route describes its message with `template` only. The `slack_blocks` key is
   gone, and the `buttons` block is now `actions`.
 - Every channel shows every block: a block a channel cannot draw is sent as text in that
@@ -39,8 +50,8 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 
 ### Operator actions
 
-- Database migrations add the `hooks` table and a column each to `notifications` and
-  `api_keys`; they run on
+- Database migrations add the `hooks` table and columns to `notifications`, `api_keys` and
+  `deliveries`; they run on
   start unless `MIGRATE_ON_START=false`.
 - `direct` is now a reserved route id: rename a route of yours that has it.
 - `thread_key` values that start with `group:` are refused: those threads belong to grouping.

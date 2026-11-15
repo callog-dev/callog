@@ -16,7 +16,7 @@ import {
   type Route,
 } from "@callog/config-schema";
 import { renderGroupKey, renderRouteRecipients, TemplateRenderError } from "@callog/templates";
-import { and, desc, eq, gt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { AuditService, type AuditActor } from "../audit/audit.service";
 import { sha256Hex } from "../crypto/digest";
 import { DB, type Db } from "../db/db";
@@ -193,12 +193,15 @@ export class NotificationsService {
       thread_key: notification.threadKey,
       created_at: notification.createdAt,
       deliveries: rows.map((d) => ({
+        id: d.id,
         provider: d.provider,
         destination: d.destination,
         status: d.status,
         attempts: d.attempts,
         last_error: d.lastError,
         sent_at: d.sentAt,
+        /** The delivery that took over when this one failed for good. */
+        fallback_to: d.fallbackTo,
       })),
     };
   }
@@ -223,7 +226,14 @@ export class NotificationsService {
       const retried = await tx
         .update(deliveries)
         .set({ status: "pending" })
-        .where(and(eq(deliveries.notificationId, notificationId), eq(deliveries.status, "failed")))
+        .where(
+          and(
+            eq(deliveries.notificationId, notificationId),
+            eq(deliveries.status, "failed"),
+            // What another delivery took over is not sent a second time.
+            isNull(deliveries.fallbackTo),
+          ),
+        )
         .returning({ id: deliveries.id });
       await tx
         .update(notifications)

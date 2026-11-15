@@ -39,6 +39,12 @@ export class PreferencesService {
     );
   }
 
+  /** Those of `personIds` who muted the route: no personal copy, no mention. */
+  async mutedAmong(personIds: string[], routeId: string): Promise<Set<string>> {
+    const prefs = await this.getMany([...new Set(personIds)]);
+    return new Set(personIds.filter((id) => prefs.get(id)!.mutedRoutes.includes(routeId)));
+  }
+
   async setDmChannel(tenantId: string, personId: string, dmChannel: DmChannel): Promise<void> {
     await this.db
       .insert(personPreferences)

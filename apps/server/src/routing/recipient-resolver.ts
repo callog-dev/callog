@@ -61,6 +61,8 @@ export interface Resolution {
   refs: ResolvedRef[];
   /** Synchronous mention markup for templates. */
   mention: MentionResolver;
+  /** The same, leaving these people out: they asked not to be mentioned. */
+  mentionWithout(personIds: ReadonlySet<string>): MentionResolver;
   /** Refs that produced no mentionable account at the target provider. */
   unmapped: Ref[];
   /** For unmapped teams: why (unknown team, no `members_from`, nobody linked). */
@@ -183,11 +185,21 @@ export class RecipientResolver {
       return { ref, persons: [...members.values()], slackUsergroupId: team.slackUsergroupId };
     });
 
-    const markup = new Map<Ref, string[]>();
-    for (const r of resolved) {
-      const m = mentionMarkup(r, target);
-      if (m !== undefined) markup.set(r.ref, m);
-    }
+    const markupOf = (silent: ReadonlySet<string>) => {
+      const byRef = new Map<Ref, string[]>();
+      for (const r of resolved) {
+        const persons = r.persons.filter((p) => !silent.has(p.personId));
+        // A group mention cannot leave one member out: the rest are mentioned one by one.
+        const everyone = persons.length === r.persons.length;
+        const m = mentionMarkup(
+          { ...r, persons, slackUsergroupId: everyone ? r.slackUsergroupId : undefined },
+          target,
+        );
+        if (m !== undefined) byRef.set(r.ref, m);
+      }
+      return byRef;
+    };
+    const markup = markupOf(new Set());
     const unmapped = refs.filter((ref) => !markup.has(ref));
     const reasons = new Map<Ref, string>();
     for (const ref of unmapped) {
@@ -197,6 +209,10 @@ export class RecipientResolver {
     return {
       refs: resolved,
       mention: (ref) => markup.get(ref),
+      mentionWithout: (personIds) => {
+        const quiet = markupOf(personIds);
+        return (ref) => quiet.get(ref);
+      },
       unmapped,
       reasons,
     };

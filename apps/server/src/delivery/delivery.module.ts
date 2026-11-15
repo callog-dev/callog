@@ -5,6 +5,7 @@ import { RoutingModule } from "../routing/routing.module";
 import { TenantConfigModule } from "../tenant-config/tenant-config.module";
 import { DeliveryService } from "./delivery.service";
 import { DeliveryWorker } from "./delivery.worker";
+import { PersonalCopies } from "./personal-copies";
 import { DESTINATION_RATE_LIMITER, DestinationRateLimiter } from "./rate-limiter";
 
 @Module({
@@ -12,6 +13,7 @@ import { DESTINATION_RATE_LIMITER, DestinationRateLimiter } from "./rate-limiter
   providers: [
     DeliveryService,
     DeliveryWorker,
+    PersonalCopies,
     { provide: DESTINATION_RATE_LIMITER, useFactory: () => new DestinationRateLimiter() },
   ],
 })

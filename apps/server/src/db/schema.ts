@@ -1,3 +1,4 @@
+import type { Ref } from "@callog/config-schema";
 import { sql } from "drizzle-orm";
 import {
   bigint,
@@ -194,6 +195,12 @@ export type ProviderMessageRef =
   | { provider: "slack"; channel: string; ts: string }
   | { provider: "telegram"; chatId: string; messageId: number };
 
+/** Where one delivery goes; `destination` is a room, or `dm:<account id>` for a person. */
+export interface DeliveryTarget {
+  provider: Extract<Provider, "slack" | "telegram">;
+  destination: string;
+}
+
 export const deliveries = pgTable(
   "deliveries",
   {
@@ -210,6 +217,16 @@ export const deliveries = pgTable(
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
     providerMessageRef: jsonb("provider_message_ref").$type<ProviderMessageRef>(),
+    /** Whom a personal copy, or what replaced it, is for: `person:<id>` or an unknown ref. */
+    forPeople: text("for_people")
+      .array()
+      .$type<Ref[]>()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** Where to send instead when this delivery fails for good, in order. */
+    fallbacks: jsonb("fallbacks").$type<DeliveryTarget[]>().notNull().default([]),
+    /** The delivery that took over when this one failed for good. */
+    fallbackTo: uuid("fallback_to"),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -338,7 +355,7 @@ export const personPreferences = pgTable("person_preferences", {
   dmChannel: text("dm_channel", { enum: ["slack", "telegram"] })
     .notNull()
     .default("slack"),
-  /** Routes whose personal copies the person does not want. Channel mentions are unaffected. */
+  /** Routes the person does not want to hear from: no personal copy and no mention. */
   mutedRoutes: text("muted_routes")
     .array()
     .notNull()

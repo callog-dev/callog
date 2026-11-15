@@ -98,7 +98,7 @@ export class SlackCommands {
       if (action === "mute") await this.preferences.mute(tenantId, personId, value);
       else await this.preferences.unmute(personId, value);
       return action === "mute"
-        ? `Muted personal copies of \`${value}\`. You are still mentioned in its channels.`
+        ? `Muted \`${value}\`: no personal copies, and its channels name you without a mention.`
         : `Unmuted \`${value}\`.`;
     }
     if (action)

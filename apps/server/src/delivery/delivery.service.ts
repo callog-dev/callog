@@ -1,28 +1,30 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import {
   findRoute,
+  parseRef,
   splitRecipients,
   type Config,
   type Ref,
   type Route,
 } from "@callog/config-schema";
-import { TemplateRenderError } from "@callog/templates";
+import { TemplateRenderError, type MentionResolver } from "@callog/templates";
 import { and, asc, count, eq, inArray, lt, max, ne, sql } from "drizzle-orm";
 import { MessageGoneError, type Channel, type ChannelId } from "../channels/channel";
 import { ChannelRegistry } from "../channels/channel-registry";
 import { DB, type Db } from "../db/db";
 import { deliveries, notifications, type ProviderMessageRef } from "../db/schema";
 import { MetricsService } from "../metrics/metrics.service";
-import { RecipientResolver } from "../routing/recipient-resolver";
+import { RecipientResolver, type Resolution } from "../routing/recipient-resolver";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
 import {
   defaultTargets,
   parseDestination,
-  personalTarget,
   routeTargets,
+  targetKey,
   type Target,
 } from "./destinations";
 import { PreferencesService } from "../identity/preferences.service";
+import { PersonalCopies, type PersonalCopy } from "./personal-copies";
 import { DESTINATION_RATE_LIMITER, DestinationRateLimiter } from "./rate-limiter";
 
 type Notification = typeof notifications.$inferSelect;
@@ -72,6 +74,7 @@ export class DeliveryService {
     private readonly metrics: MetricsService,
     @Inject(DESTINATION_RATE_LIMITER) private readonly limiter: DestinationRateLimiter,
     private readonly preferences: PreferencesService,
+    private readonly personalCopies: PersonalCopies,
   ) {}
 
   async deliver(notificationId: string, attempts: AttemptInfo): Promise<NotificationStatus> {
@@ -115,18 +118,24 @@ export class DeliveryService {
     }
     await this.setStatus(notification.id, "processing");
 
-    const rendered = new Map<Delivery["provider"], Promise<Rendered>>();
+    const rendered = new Map<string, Promise<Rendered>>();
     let transientError: string | undefined;
 
-    for (const delivery of rows.filter((d) => d.status === "pending")) {
+    // A delivery that falls back adds another one to the end of the queue.
+    const queue = rows.filter((d) => d.status === "pending");
+    for (const delivery of queue) {
       try {
-        if (!rendered.has(delivery.provider)) {
+        // A post that stands in for personal copies says whom it is for.
+        const standsFor =
+          parseDestination(delivery.destination).kind === "place" ? delivery.forPeople : [];
+        const key = [delivery.provider, ...standsFor].join("\n");
+        if (!rendered.has(key)) {
           rendered.set(
-            delivery.provider,
-            this.render(delivery.provider, notification, route, config, recipients),
+            key,
+            this.render(delivery.provider, notification, route, config, recipients, standsFor),
           );
         }
-        const outcome = await rendered.get(delivery.provider)!;
+        const outcome = await rendered.get(key)!;
         if (outcome instanceof PermanentFailure) throw outcome;
         const ref = await this.send(
           outcome.channel,
@@ -143,20 +152,25 @@ export class DeliveryService {
         );
       } catch (err) {
         const { permanent, message } = classify(err, this.channels.get(delivery.provider));
-        await this.db
-          .update(deliveries)
-          .set({
-            attempts: delivery.attempts + 1,
-            lastError: message,
-            ...(permanent ? { status: "failed" as const } : {}),
-          })
-          .where(eq(deliveries.id, delivery.id));
-        if (permanent)
+        // Out of attempts is as final as a refusal: the fallback gets its try in this run.
+        const final = permanent || attempt >= maxAttempts;
+        await this.patch(delivery, {
+          attempts: delivery.attempts + 1,
+          lastError: message,
+          ...(final ? { status: "failed" as const } : {}),
+        });
+        if (final) {
           this.metrics.deliveries.inc({ provider: delivery.provider, status: "failed" });
-        else transientError = message;
+          const next = await this.fallBack(delivery, rows);
+          if (next) {
+            rows.push(next);
+            queue.push(next);
+          }
+        }
+        if (!permanent) transientError = message;
         this.logger.warn(
           `Delivery ${delivery.id} to ${delivery.provider}:${delivery.destination} ` +
-            `${permanent ? "failed" : `will retry (attempt ${attempt}/${maxAttempts})`}: ${message}`,
+            `${final ? "failed" : `will retry (attempt ${attempt}/${maxAttempts})`}: ${message}`,
         );
       }
     }
@@ -197,9 +211,23 @@ export class DeliveryService {
         counted.add(provider);
       }
     }
+    const planned = new Map<string, Target & Partial<PersonalCopy>>();
+    const plan = (copy: Target & Partial<PersonalCopy>) => {
+      const key = targetKey(copy);
+      const existing = planned.get(key);
+      // A room that already gets the notification needs no second message, only the names.
+      if (existing) existing.forPeople = [...(existing.forPeople ?? []), ...(copy.forPeople ?? [])];
+      else planned.set(key, { ...copy });
+    };
+    targets.forEach(plan);
     if (route.dm) {
-      const personal = await this.dmTargets(notification.tenantId, route, config, recipients);
-      targets.push(...personal.targets);
+      const personal = await this.personalCopies.plan(
+        notification.tenantId,
+        route,
+        config,
+        recipients,
+      );
+      personal.copies.forEach(plan);
       // Someone with no account anywhere got no copy: an admin has to see that.
       for (const channel of this.channels.all()) {
         if (counted.has(channel.id)) continue;
@@ -212,55 +240,59 @@ export class DeliveryService {
         );
       }
     }
-    if (targets.length === 0) targets.push(...defaultTargets(route, config, this.channels));
-    if (targets.length === 0) return [];
+    if (planned.size === 0) defaultTargets(route, config, this.channels).forEach(plan);
+    if (planned.size === 0) return [];
     return this.db
       .insert(deliveries)
       .values(
-        targets.map((t) => ({
+        [...planned.values()].map((copy) => ({
           tenantId: notification.tenantId,
           notificationId: notification.id,
-          ...t,
+          ...copy,
         })),
       )
       .returning();
   }
 
   /**
-   * Personal copies for routes with `dm: true`: every recipient (teams expanded)
-   * once, in their preferred channel — falling back to another one they have — unless
-   * they muted the route. Destinations are `dm:<account id>`.
+   * Hands a delivery that failed for good over to the first of its fallbacks that has not
+   * failed too: a delivery already on its way there, which then also stands for these
+   * people, or a new one. Returns the new delivery, if one was made.
    */
-  private async dmTargets(
-    tenantId: string,
-    route: Route,
-    config: Config,
-    recipients: Ref[],
-  ): Promise<{ targets: Target[]; unreached: Ref[]; reasons: Map<Ref, string> }> {
-    const channelIds = this.channels.all().map((c) => c.id);
-    const accounts = new Map<string, Map<ChannelId, string>>();
-    // Recipients that no channel can reach, and why.
-    let unreached = new Set(recipients);
-    const reasons = new Map<Ref, string>();
-    for (const channelId of channelIds) {
-      const resolution = await this.resolver.resolve(tenantId, config, recipients, channelId);
-      unreached = new Set(resolution.unmapped.filter((ref) => unreached.has(ref)));
-      for (const [ref, reason] of resolution.reasons) reasons.set(ref, reason);
-      for (const person of resolution.refs.flatMap((r) => r.persons)) {
-        const ids = accounts.get(person.personId) ?? new Map<ChannelId, string>();
-        if (person.target) ids.set(channelId, person.target.externalId);
-        accounts.set(person.personId, ids);
+  private async fallBack(failed: Delivery, rows: Delivery[]): Promise<Delivery | undefined> {
+    for (const [i, target] of failed.fallbacks.entries()) {
+      const existing = rows.find((row) => targetKey(row) === targetKey(target));
+      if (existing?.status === "failed") continue;
+      if (existing?.status === "pending") {
+        await this.patch(existing, {
+          forPeople: [...new Set([...existing.forPeople, ...failed.forPeople])],
+        });
       }
+      const [created] = existing
+        ? []
+        : await this.db
+            .insert(deliveries)
+            .values({
+              tenantId: failed.tenantId,
+              notificationId: failed.notificationId,
+              ...target,
+              forPeople: failed.forPeople,
+              fallbacks: failed.fallbacks.slice(i + 1),
+            })
+            .returning();
+      await this.patch(failed, { fallbackTo: (existing ?? created!).id });
+      this.logger.warn(
+        `Delivery ${failed.id} falls back to ${target.provider}:${target.destination}`,
+      );
+      return created;
     }
-    const prefs = await this.preferences.getMany([...accounts.keys()]);
-    const targets: Target[] = [];
-    for (const [personId, ids] of accounts) {
-      const pref = prefs.get(personId)!;
-      if (pref.mutedRoutes.includes(route.id)) continue;
-      const provider = [pref.dmChannel, ...channelIds].find((id) => ids.has(id));
-      if (provider) targets.push(personalTarget(provider, ids.get(provider)!));
-    }
-    return { targets, unreached: [...unreached], reasons };
+    return undefined;
+  }
+
+  /** Changes a delivery in the database and in the row this run holds, so they agree. */
+  private async patch(row: Delivery, change: Partial<Delivery>): Promise<void> {
+    Object.assign(row, change);
+    await this.db.update(deliveries).set(change).where(eq(deliveries.id, row.id));
   }
 
   /** Renders once per channel per attempt; template errors become permanent failures. */
@@ -270,6 +302,7 @@ export class DeliveryService {
     route: Route,
     config: Config,
     recipients: Ref[],
+    standsFor: Ref[],
   ): Promise<Rendered> {
     const channel = this.channels.get(provider);
     if (!channel) return new PermanentFailure(`${provider} is not a delivery channel`);
@@ -280,15 +313,41 @@ export class DeliveryService {
       channel.id,
     );
     try {
-      const input = { data: notification.data, recipients };
-      const shown = await this.withRepeats(route, notification);
-      return { channel, message: channel.render(shown, input, resolution.mention) };
+      const names = await this.namesOf(notification.tenantId, config, standsFor, channel.id);
+      const input = { data: notification.data, recipients, fallback_for: names };
+      let shown = await this.withRepeats(route, notification);
+      // The post that replaces personal copies starts with whom it is for.
+      if (names.length > 0) shown = withContext(shown, STANDS_FOR, "first");
+      const mention = await this.mentionFor(route, resolution);
+      return { channel, message: channel.render(shown, input, mention) };
     } catch (err) {
       if (err instanceof TemplateRenderError) {
         return new PermanentFailure(`Template error at ${err.message}`);
       }
       throw err;
     }
+  }
+
+  /** People who muted the route are not mentioned in it either. */
+  private async mentionFor(route: Route, resolution: Resolution): Promise<MentionResolver> {
+    const personIds = resolution.refs.flatMap((r) => r.persons.map((p) => p.personId));
+    if (personIds.length === 0) return resolution.mention;
+    const muted = await this.preferences.mutedAmong(personIds, route.id);
+    return muted.size > 0 ? resolution.mentionWithout(muted) : resolution.mention;
+  }
+
+  /** What to call the people a post stands for: their name, or the visible part of the ref. */
+  private async namesOf(
+    tenantId: string,
+    config: Config,
+    refs: Ref[],
+    channelId: ChannelId,
+  ): Promise<string[]> {
+    if (refs.length === 0) return [];
+    const resolution = await this.resolver.resolve(tenantId, config, refs, channelId);
+    return resolution.refs.map(
+      ({ ref, persons }) => persons[0]?.displayName ?? parseRef(ref).value,
+    );
   }
 
   /**
@@ -308,8 +367,7 @@ export class DeliveryService {
       );
     if (!group?.lastAt || group.count < 2) return route;
     const time = group.lastAt.toISOString().slice(11, 16);
-    const context = `Repeated ${group.count} times, last at ${time} UTC`;
-    return { ...route, template: [...route.template, { context }] };
+    return withContext(route, `Repeated ${group.count} times, last at ${time} UTC`, "last");
   }
 
   /**
@@ -421,15 +479,7 @@ export class DeliveryService {
         .where(eq(deliveries.id, d.id));
       this.metrics.deliveries.inc({ provider: d.provider, status: "failed" });
     }
-    const sent = rows.filter((r) => r.status === "sent").length;
-    const status: NotificationStatus =
-      rows.length === 0
-        ? "failed"
-        : sent === rows.length
-          ? "delivered"
-          : sent === 0
-            ? "failed"
-            : "partially_failed";
+    const status = overallStatus(rows);
     await this.setStatus(notification.id, status);
     if (status !== "delivered") {
       this.logger.warn(`Notification ${notification.id} finished as ${status}: ${reason}`);
@@ -440,6 +490,31 @@ export class DeliveryService {
   private async setStatus(id: string, status: NotificationStatus): Promise<void> {
     await this.db.update(notifications).set({ status }).where(eq(notifications.id, id));
   }
+}
+
+/** A failed delivery whose fallback got through does not count against the notification. */
+function overallStatus(rows: Delivery[]): NotificationStatus {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const madeUpFor = (row: Delivery): boolean => {
+    let last = row;
+    for (let next = byId.get(last.fallbackTo ?? ""); next; next = byId.get(last.fallbackTo ?? "")) {
+      last = next;
+    }
+    return last !== row && last.status === "sent";
+  };
+  const counted = rows.filter((row) => row.status === "sent" || !madeUpFor(row));
+  const sent = counted.filter((row) => row.status === "sent").length;
+  if (sent === 0) return "failed";
+  return sent === counted.length ? "delivered" : "partially_failed";
+}
+
+const STANDS_FOR = "For {{ fallback_for | join: ', ' }}";
+
+/** The route with one more line of small print, before or after its template. */
+function withContext(route: Route, context: string, where: "first" | "last"): Route {
+  const template =
+    where === "first" ? [{ context }, ...route.template] : [...route.template, { context }];
+  return { ...route, template };
 }
 
 function classify(err: unknown, channel?: Channel): { permanent: boolean; message: string } {

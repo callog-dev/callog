@@ -120,7 +120,7 @@ function PersonPage({ me }: { me: LinkedMe }) {
           <CardTitle>Personal copies</CardTitle>
           <CardDescription>
             Routes with personal copies also message you directly. Choose where they arrive and
-            which routes stay quiet.
+            which routes stay quiet: a muted route sends you no copy and does not mention you.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
