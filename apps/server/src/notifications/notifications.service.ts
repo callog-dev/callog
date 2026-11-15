@@ -1,4 +1,5 @@
 import {
+  Logger,
   ConflictException,
   Inject,
   Injectable,
@@ -6,7 +7,8 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { ownValue, splitRecipients } from "@callog/config-schema";
+import { ownValue, placeOf, splitRecipients, type Route } from "@callog/config-schema";
+import { renderRouteRecipients, TemplateRenderError } from "@callog/templates";
 import { and, eq, gt, lte } from "drizzle-orm";
 import { AuditService, type AuditActor } from "../audit/audit.service";
 import { sha256Hex } from "../crypto/digest";
@@ -17,7 +19,7 @@ import { QueueService } from "../queue/queue.service";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
 import { MetricsService } from "../metrics/metrics.service";
 import { DataValidator } from "./data-validator";
-import type { NotifyRequest } from "./notify-request";
+import { MAX_RECIPIENTS, type NotifyRequest } from "./notify-request";
 
 export const DELIVER_TASK = "notification.deliver";
 /**
@@ -42,6 +44,8 @@ class IdempotencyRace extends Error {}
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly configs: TenantConfigService,
@@ -72,8 +76,9 @@ export class NotificationsService {
     if (!route) throw new NotFoundException(`Route "${request.route}" not found`);
     this.auth.assertAllowed(route, producer);
 
+    const isKnownPlace = (name: string) => ownValue(active.config.places, name) !== undefined;
     const unknownPlaces = splitRecipients(request.recipients).places.filter(
-      (name) => !ownValue(active.config.places, name),
+      (name) => !isKnownPlace(name),
     );
     if (unknownPlaces.length > 0) {
       throw new UnprocessableEntityException({
@@ -96,6 +101,18 @@ export class NotificationsService {
       }
     }
 
+    // The route's own recipients come from data the sender may not control, so the ones
+    // that lead nowhere are dropped instead of failing the request.
+    const recipients = [
+      ...new Set([
+        ...request.recipients,
+        ...this.routeRecipients(route, request.data).filter((recipient) => {
+          const place = placeOf(recipient);
+          return place === undefined || isKnownPlace(place);
+        }),
+      ]),
+    ].slice(0, MAX_RECIPIENTS);
+
     try {
       const notificationId = await this.db.transaction(async (tx) => {
         const [notification] = await tx
@@ -106,7 +123,7 @@ export class NotificationsService {
             configVersionId: active.versionId,
             source: producer.source,
             data: request.data,
-            recipients: request.recipients,
+            recipients,
             threadKey: request.thread_key,
             update: request.update,
           })
@@ -207,6 +224,17 @@ export class NotificationsService {
         tx,
       );
     });
+  }
+
+  /** Config validation renders these on the route's examples; real data can still break one. */
+  private routeRecipients(route: Route, data: Record<string, unknown>): string[] {
+    try {
+      return renderRouteRecipients(route, data);
+    } catch (err) {
+      if (!(err instanceof TemplateRenderError)) throw err;
+      this.logger.warn(`Route "${route.id}" recipients were not rendered: ${err.message}`);
+      return [];
+    }
   }
 
   /** Queued per thread: messages of one thread go out strictly in order. */

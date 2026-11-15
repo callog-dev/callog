@@ -6,6 +6,7 @@ import {
   type Route,
 } from "@callog/config-schema";
 import { TemplateRenderError } from "./engine";
+import { renderRouteRecipients } from "./recipients";
 import { renderSlack } from "./slack";
 import { renderTelegram } from "./telegram";
 
@@ -23,6 +24,7 @@ export function validateRouteTemplates(route: Route): TemplateIssue[] {
   const issues: TemplateIssue[] = [];
   inputs.forEach((input, i) => {
     try {
+      renderRouteRecipients(route, input.data);
       renderSlack(route, input);
       renderTelegram(route, input);
     } catch (err) {

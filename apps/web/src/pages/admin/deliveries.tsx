@@ -52,6 +52,7 @@ function StatusBadge({ status }: { status: NotificationStatus }) {
 function describeSource(s: NotificationRow["source"]): { key: string | null; label: string } {
   if (s.type === "github_oidc") return { key: s.repository, label: s.repository };
   if (s.type === "api_key") return { key: s.apiKeyName, label: `key ${s.apiKeyName}` };
+  if (s.type === "hook") return { key: null, label: `hook ${s.hookName}` };
   return { key: null, label: `test by ${s.actor}` };
 }
 

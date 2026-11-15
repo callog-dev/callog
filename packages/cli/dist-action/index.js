@@ -37818,8 +37818,9 @@ var require_refs = __commonJS({
   "../config-schema/dist/refs.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.placeRefSchema = exports2.slugSchema = exports2.REF_KINDS = void 0;
+    exports2.recipientSchema = exports2.placeRefSchema = exports2.slugSchema = exports2.REF_KINDS = void 0;
     exports2.refSchema = refSchema;
+    exports2.placeOf = placeOf;
     exports2.splitRecipients = splitRecipients;
     exports2.parseRef = parseRef;
     var zod_1 = require_zod();
@@ -37832,11 +37833,15 @@ var require_refs = __commonJS({
     }
     var PLACE_REF = new RegExp(`^place:(${SLUG})$`);
     exports2.placeRefSchema = zod_1.z.string().regex(PLACE_REF, "must be a reference like place:\u2026").transform((v) => v);
+    exports2.recipientSchema = zod_1.z.union([refSchema(exports2.REF_KINDS), exports2.placeRefSchema]);
+    function placeOf(recipient) {
+      return PLACE_REF.exec(recipient)?.[1];
+    }
     function splitRecipients(recipients) {
       const people = [];
       const places = [];
       for (const recipient of recipients) {
-        const place = PLACE_REF.exec(recipient)?.[1];
+        const place = placeOf(recipient);
         if (place === void 0)
           people.push(recipient);
         else
@@ -37929,6 +37934,12 @@ var require_schemas3 = __commonJS({
        * nobody else — its recipients name no place and get no personal copy.
        */
       default_place: refs_1.slugSchema.optional(),
+      /**
+       * Recipients the route adds on its own, for senders that cannot name any (inbound
+       * webhooks). Each entry is a Liquid template over `data` that renders to recipients
+       * separated by spaces or commas; anything that is not a recipient is left out.
+       */
+      recipients: zod_1.z.array(zod_1.z.string().min(1)).default([]),
       mentions: zod_1.z.enum(["recipients", "none"]).default("recipients"),
       /**
        * Also send each recipient a personal copy in their preferred channel (Slack or
@@ -37955,6 +37966,7 @@ var require_parse3 = __commonJS({
     exports2.parseConfigTree = parseConfigTree;
     var yaml_1 = require_dist2();
     var data_schema_1 = require_data_schema();
+    var refs_1 = require_refs();
     var schemas_1 = require_schemas3();
     function ownValue2(record, key) {
       return Object.hasOwn(record, key) ? record[key] : void 0;
@@ -38085,6 +38097,18 @@ var require_parse3 = __commonJS({
             message: "destinations or default_place is required"
           });
         }
+        route.recipients.forEach((recipient, i) => {
+          if (/\{[{%]/.test(recipient))
+            return;
+          const path4 = ["recipients", i];
+          if (!refs_1.recipientSchema.safeParse(recipient).success) {
+            errors.push({ file, path: path4, message: "must be a person, a team or place:<name>" });
+            return;
+          }
+          const place = (0, refs_1.placeOf)(recipient);
+          if (place !== void 0)
+            checkPlace(path4, place);
+        });
         route.destinations.forEach((destination, i) => {
           if ("place" in destination)
             checkPlace(["destinations", i, "place"], destination.place);
@@ -43066,6 +43090,7 @@ var require_engine = __commonJS({
     exports2.renderAt = renderAt;
     exports2.httpUrl = httpUrl;
     exports2.createEngine = createEngine;
+    exports2.createPlainEngine = createPlainEngine;
     exports2.renderString = renderString;
     var liquidjs_1 = require_liquid_node();
     var SafeString = class {
@@ -43163,6 +43188,9 @@ var require_engine = __commonJS({
       });
       return engine;
     }
+    function createPlainEngine() {
+      return createEngine({ escape: (text) => text, mention: void 0, unmapped: /* @__PURE__ */ new Set() });
+    }
     function renderString(engine, source, ctx) {
       return engine.parseAndRenderSync(source, ctx);
     }
@@ -43239,11 +43267,7 @@ var require_blocks = __commonJS({
         mention: route.mentions === "none" ? void 0 : mention,
         unmapped
       });
-      const unformatted = (0, engine_1.createEngine)({
-        escape: (text) => text,
-        mention: void 0,
-        unmapped: /* @__PURE__ */ new Set()
-      });
+      const unformatted = (0, engine_1.createPlainEngine)();
       const render = {
         markup: (path4, source) => (0, engine_1.renderAt)(path4, () => (0, markdown_1.renderMarkdown)(formatted, source, target, ctx)),
         plain: (path4, source) => (0, engine_1.renderAt)(path4, () => (0, engine_1.renderString)(unformatted, source, ctx))
@@ -43470,6 +43494,31 @@ ${part}` : part;
   }
 });
 
+// ../templates/dist/recipients.js
+var require_recipients = __commonJS({
+  "../templates/dist/recipients.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.renderRouteRecipients = renderRouteRecipients;
+    var config_schema_1 = require_dist3();
+    var engine_1 = require_engine();
+    function renderRouteRecipients(route, data) {
+      const engine = (0, engine_1.createPlainEngine)();
+      const ctx = { data, recipients: [], route: { id: route.id } };
+      const found = /* @__PURE__ */ new Set();
+      route.recipients.forEach((source, i) => {
+        const rendered = (0, engine_1.renderAt)(["recipients", i], () => (0, engine_1.renderString)(engine, source, ctx));
+        for (const candidate of rendered.split(/[\s,]+/)) {
+          const recipient = config_schema_1.recipientSchema.safeParse(candidate);
+          if (recipient.success)
+            found.add(recipient.data);
+        }
+      });
+      return [...found];
+    }
+  }
+});
+
 // ../templates/dist/validate.js
 var require_validate2 = __commonJS({
   "../templates/dist/validate.js"(exports2) {
@@ -43479,6 +43528,7 @@ var require_validate2 = __commonJS({
     exports2.validateConfigTree = validateConfigTree2;
     var config_schema_1 = require_dist3();
     var engine_1 = require_engine();
+    var recipients_1 = require_recipients();
     var slack_1 = require_slack();
     var telegram_1 = require_telegram();
     function validateRouteTemplates(route) {
@@ -43486,6 +43536,7 @@ var require_validate2 = __commonJS({
       const issues = [];
       inputs.forEach((input, i) => {
         try {
+          (0, recipients_1.renderRouteRecipients)(route, input.data);
           (0, slack_1.renderSlack)(route, input);
           (0, telegram_1.renderTelegram)(route, input);
         } catch (err) {
@@ -43517,7 +43568,7 @@ var require_dist4 = __commonJS({
   "../templates/dist/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.validateRouteTemplates = exports2.validateConfigTree = exports2.renderTelegram = exports2.escapeTelegram = exports2.renderSlack = exports2.escapeSlack = exports2.TemplateRenderError = exports2.SafeString = void 0;
+    exports2.validateRouteTemplates = exports2.validateConfigTree = exports2.renderRouteRecipients = exports2.renderTelegram = exports2.escapeTelegram = exports2.renderSlack = exports2.escapeSlack = exports2.TemplateRenderError = exports2.SafeString = void 0;
     var engine_1 = require_engine();
     Object.defineProperty(exports2, "SafeString", { enumerable: true, get: function() {
       return engine_1.SafeString;
@@ -43538,6 +43589,10 @@ var require_dist4 = __commonJS({
     } });
     Object.defineProperty(exports2, "renderTelegram", { enumerable: true, get: function() {
       return telegram_1.renderTelegram;
+    } });
+    var recipients_1 = require_recipients();
+    Object.defineProperty(exports2, "renderRouteRecipients", { enumerable: true, get: function() {
+      return recipients_1.renderRouteRecipients;
     } });
     var validate_1 = require_validate2();
     Object.defineProperty(exports2, "validateConfigTree", { enumerable: true, get: function() {

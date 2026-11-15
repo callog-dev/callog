@@ -575,6 +575,26 @@ teams:
     expect((await call("GET", "/api/admin/api-keys")).json()[0].revokedAt).not.toBeNull();
   });
 
+  it("manages hooks", async () => {
+    const created = (
+      await call("POST", "/api/admin/hooks", { name: "grafana", route: "r" })
+    ).json();
+    expect(created.path).toMatch(/^\/v1\/hooks\/hk_/);
+    expect(created).toMatchObject({ name: "grafana", routeId: "r" });
+    expect((await call("GET", "/api/admin/hooks")).json()[0]).toMatchObject({
+      name: "grafana",
+      routeMissing: false,
+    });
+    expect(JSON.stringify((await call("GET", "/api/admin/hooks")).json())).not.toContain(
+      created.path,
+    );
+    expect(
+      (await call("POST", "/api/admin/hooks", { name: "other", route: "nope" })).statusCode,
+    ).toBe(404);
+    expect((await call("DELETE", "/api/admin/hooks/grafana")).statusCode).toBe(204);
+    expect((await call("GET", "/api/admin/hooks")).json()[0].revokedAt).not.toBeNull();
+  });
+
   it("reloads the config", async () => {
     github.push("acme/notify-config", {
       "routes/x.yaml":

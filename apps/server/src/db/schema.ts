@@ -129,9 +129,28 @@ export const apiKeys = pgTable(
   (t) => [unique("api_keys_tenant_name_uq").on(t.tenantId, t.name)],
 );
 
+/** Inbound webhooks: a secret URL that posts any JSON it receives to one route. */
+export const hooks = pgTable(
+  "hooks",
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text("name").notNull(),
+    routeId: text("route_id").notNull(),
+    /** First characters of the token, shown in the UI to tell hooks apart. */
+    prefix: text("prefix").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: createdAt(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [unique("hooks_tenant_name_uq").on(t.tenantId, t.name)],
+);
+
 export type NotificationSource =
   | { type: "github_oidc"; repository: string }
   | { type: "api_key"; apiKeyId: string; apiKeyName: string }
+  | { type: "hook"; hookId: string; hookName: string; routeId: string }
   /** "Send test" in the admin UI; `actor` is who pressed it (`@login` or a person's name). */
   | { type: "admin_test"; actor: string };
 

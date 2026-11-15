@@ -1,14 +1,13 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { randomBytes } from "node:crypto";
-import { sha256Hex } from "../crypto/digest";
+import { mintSecret, sha256Hex } from "../crypto/digest";
 import { DB, type Db } from "../db/db";
 import { apiKeys } from "../db/schema";
 
 const API_KEY_PREFIX = "ntf_";
 
-/** Key names are referenced from routes' `allowed_sources.api_keys`. */
+/** Names of API keys (referenced from routes' `allowed_sources.api_keys`) and of hooks. */
 export const apiKeyNameSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9_-]*$/, "lowercase letters, digits, - and _");
@@ -32,15 +31,10 @@ export class ApiKeysService {
 
   /** Returns the plaintext key exactly once. */
   async create(tenantId: string, name: string): Promise<{ key: string; info: ApiKeyInfo }> {
-    const key = `${API_KEY_PREFIX}${randomBytes(32).toString("base64url")}`;
+    const { secret: key, display, hash } = mintSecret(API_KEY_PREFIX);
     const rows = await this.db
       .insert(apiKeys)
-      .values({
-        tenantId,
-        name,
-        prefix: key.slice(0, API_KEY_PREFIX.length + 6),
-        keyHash: sha256Hex(key),
-      })
+      .values({ tenantId, name, prefix: display, keyHash: hash })
       .onConflictDoNothing({ target: [apiKeys.tenantId, apiKeys.name] })
       .returning();
     if (rows.length === 0) throw new ConflictException(`API key "${name}" already exists`);

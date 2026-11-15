@@ -142,6 +142,11 @@ export function createEngine(options: EngineOptions): Liquid {
   return engine;
 }
 
+/** For strings that hold no markup: nothing is escaped, a mention is the person's name. */
+export function createPlainEngine(): Liquid {
+  return createEngine({ escape: (text) => text, mention: undefined, unmapped: new Set() });
+}
+
 export function renderString(engine: Liquid, source: string, ctx: RenderContext): string {
   return engine.parseAndRenderSync(source, ctx);
 }

@@ -1,6 +1,7 @@
 import type { Block, Ref, Route } from "@callog/config-schema";
 import {
   createEngine,
+  createPlainEngine,
   httpUrl,
   renderAt,
   renderString,
@@ -69,11 +70,7 @@ export function renderBlocks<Native extends BlockType>(
   });
   // Plain strings cannot hold mention markup: a mention there is the person's name, and
   // says nothing about whether the person has an account in the channel.
-  const unformatted = createEngine({
-    escape: (text) => text,
-    mention: undefined,
-    unmapped: new Set(),
-  });
+  const unformatted = createPlainEngine();
   const render: BlockStrings = {
     markup: (path, source) => renderAt(path, () => renderMarkdown(formatted, source, target, ctx)),
     plain: (path, source) => renderAt(path, () => renderString(unformatted, source, ctx)),

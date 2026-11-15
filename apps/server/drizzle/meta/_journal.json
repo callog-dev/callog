@@ -92,6 +92,13 @@
       "when": 1792259969441,
       "tag": "0012_telegram_chats",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794719162405,
+      "tag": "0013_hooks",
+      "breakpoints": true
     }
   ]
 }

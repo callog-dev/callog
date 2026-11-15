@@ -110,6 +110,12 @@ export const routeSchema = z.strictObject({
    * nobody else — its recipients name no place and get no personal copy.
    */
   default_place: slugSchema.optional(),
+  /**
+   * Recipients the route adds on its own, for senders that cannot name any (inbound
+   * webhooks). Each entry is a Liquid template over `data` that renders to recipients
+   * separated by spaces or commas; anything that is not a recipient is left out.
+   */
+  recipients: z.array(z.string().min(1)).default([]),
   mentions: z.enum(["recipients", "none"]).default("recipients"),
   /**
    * Also send each recipient a personal copy in their preferred channel (Slack or

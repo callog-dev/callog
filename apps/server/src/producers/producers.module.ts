@@ -3,6 +3,7 @@ import { TenantConfigModule } from "../tenant-config/tenant-config.module";
 import { TenantsModule } from "../tenants/tenants.module";
 import { AdminApiKeysController } from "./admin-api-keys.controller";
 import { ApiKeysService } from "./api-keys.service";
+import { HooksService } from "./hooks.service";
 import { githubActionsKeys, OIDC_KEY_RESOLVER } from "./github-oidc";
 import { ProducerAuthService } from "./producer-auth.service";
 import { WhoamiController } from "./whoami.controller";
@@ -12,9 +13,10 @@ import { WhoamiController } from "./whoami.controller";
   controllers: [AdminApiKeysController, WhoamiController],
   providers: [
     ApiKeysService,
+    HooksService,
     ProducerAuthService,
     { provide: OIDC_KEY_RESOLVER, useFactory: githubActionsKeys },
   ],
-  exports: [ProducerAuthService, ApiKeysService],
+  exports: [ProducerAuthService, ApiKeysService, HooksService],
 })
 export class ProducersModule {}

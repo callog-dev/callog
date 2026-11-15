@@ -115,6 +115,7 @@ export interface NotificationRow {
   source:
     | { type: "github_oidc"; repository: string }
     | { type: "api_key"; apiKeyName: string }
+    | { type: "hook"; hookId: string; hookName: string; routeId: string }
     | { type: "admin_test"; actor: string };
   threadKey: string | null;
   createdAt: string;

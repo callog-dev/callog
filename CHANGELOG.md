@@ -13,6 +13,12 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 - Places: `places.yaml` gives rooms a name (`deploys: { slack: "#deploys" }`). A route delivers
   to `place: <name>`, and a sender can add `place:<name>` to `recipients` to post there too —
   without knowing which messenger or channel is behind the name.
+- Hooks: an admin binds a secret URL (`POST /v1/hooks/<token>`) to one route. Any JSON object
+  posted there becomes the notification's `data` — for systems that cannot sign a request or
+  set a header. The token is shown once; a hook is revoked by name.
+- A route can add recipients on its own with `recipients`: Liquid templates over `data` that
+  render to people, teams or places (`github:{{ data.commit.author }}`). What does not render
+  to a recipient is left out, so a webhook payload never fails the request.
 - A route without `destinations` names a `default_place`: where a notification is posted when
   it reaches nobody else — its recipients name no place and get no personal copy.
 
@@ -26,6 +32,9 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 
 ### Operator actions
 
+- A database migration adds the `hooks` table; it runs on start unless `MIGRATE_ON_START=false`.
+- A hook's token is part of its URL. Keep request paths under `/v1/hooks/` out of access logs
+  of the proxy in front of Callog, and make that path reachable from the systems that send.
 - In the config repo, rename `buttons:` to `actions:` in route templates and rewrite routes
   that use `slack_blocks` with `template` blocks. `notify validate` reports both.
 

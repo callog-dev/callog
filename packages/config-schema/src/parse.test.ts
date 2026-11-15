@@ -199,6 +199,28 @@ ${lines}`;
       ]);
     });
 
+    it("checks the recipients a route writes out, leaving Liquid for the data", () => {
+      const errors = errorsOf(
+        parseConfigTree({
+          "places.yaml": places,
+          "routes/a.yaml": route(`default_place: deploys
+recipients: ["githb:octocat", "place:nowhere", "github:{{ data.x }}", "team:sre", "place:oncall"]`),
+        }),
+      );
+      expect(errors).toEqual([
+        {
+          file: "routes/a.yaml",
+          path: ["recipients", 0],
+          message: "must be a person, a team or place:<name>",
+        },
+        {
+          file: "routes/a.yaml",
+          path: ["recipients", 1],
+          message: 'unknown place "nowhere" (not defined in places.yaml)',
+        },
+      ]);
+    });
+
     it("rejects a place in two channels at once", () => {
       const errors = errorsOf(
         parseConfigTree({ "places.yaml": 'places: { a: { slack: "#a", telegram: "-1" } }' }),

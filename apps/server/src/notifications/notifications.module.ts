@@ -2,12 +2,13 @@ import { Module } from "@nestjs/common";
 import { ProducersModule } from "../producers/producers.module";
 import { TenantConfigModule } from "../tenant-config/tenant-config.module";
 import { DataValidator } from "./data-validator";
+import { HooksController } from "./hooks.controller";
 import { NotificationsService } from "./notifications.service";
 import { NotifyController } from "./notify.controller";
 
 @Module({
   imports: [ProducersModule, TenantConfigModule],
-  controllers: [NotifyController],
+  controllers: [NotifyController, HooksController],
   providers: [NotificationsService, DataValidator],
   exports: [NotificationsService],
 })

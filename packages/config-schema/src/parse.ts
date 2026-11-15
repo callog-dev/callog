@@ -1,5 +1,6 @@
 import { parseDocument } from "yaml";
 import { compileDataSchema, dataIssues } from "./data-schema";
+import { placeOf, recipientSchema } from "./refs";
 import type { z } from "zod";
 import {
   configFileSchema,
@@ -198,6 +199,17 @@ function checkRoutes(
         message: "destinations or default_place is required",
       });
     }
+    route.recipients.forEach((recipient, i) => {
+      // What Liquid renders is only known with data; what is written out is checked here.
+      if (/\{[{%]/.test(recipient)) return;
+      const path = ["recipients", i];
+      if (!recipientSchema.safeParse(recipient).success) {
+        errors.push({ file, path, message: "must be a person, a team or place:<name>" });
+        return;
+      }
+      const place = placeOf(recipient);
+      if (place !== undefined) checkPlace(path, place);
+    });
     route.destinations.forEach((destination, i) => {
       if ("place" in destination) checkPlace(["destinations", i, "place"], destination.place);
       if (!("team" in destination)) return;

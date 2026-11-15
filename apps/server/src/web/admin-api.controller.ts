@@ -15,7 +15,7 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { ownValue, parseRef, type ConfigIssue, type Ref } from "@callog/config-schema";
+import { ownValue, parseRef, slugSchema, type ConfigIssue, type Ref } from "@callog/config-schema";
 import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { parseBody } from "../admin/parse-body";
@@ -38,6 +38,7 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { PreferencesService } from "../identity/preferences.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
 import { apiKeyNameSchema, ApiKeysService } from "../producers/api-keys.service";
+import { HooksService } from "../producers/hooks.service";
 import {
   asBadRequest as asSlackBadRequest,
   slackConnectBody,
@@ -101,6 +102,7 @@ const peopleQuery = z.object({
 const newerQuery = notificationsQuery.omit({ before: true }).extend({ after: z.uuid() });
 const versionsQuery = z.object({ before: z.iso.datetime({ offset: true }).optional() });
 const apiKeyBody = z.object({ name: apiKeyNameSchema });
+const hookBody = z.object({ name: apiKeyNameSchema, route: slugSchema });
 const adminBody = z.object({ personId: z.uuid() });
 
 /** The problems stored with a config version (`errors` holds both lists). */
@@ -151,6 +153,7 @@ export class AdminApiController {
     private readonly loader: ConfigLoader,
     private readonly people: PeopleService,
     private readonly apiKeys: ApiKeysService,
+    private readonly hooks: HooksService,
     private readonly slack: SlackConnectionsService,
     private readonly slackEvents: SlackEvents,
     private readonly telegram: TelegramConnectionsService,
@@ -572,6 +575,39 @@ export class AdminApiController {
   @HttpCode(204)
   async revokeKey(@Req() req: SessionRequest, @Param("name") name: string): Promise<void> {
     if (!(await this.apiKeys.revoke(req.session!.tenantId, name))) throw new NotFoundException();
+  }
+
+  // ---- Hooks ----
+
+  /** `routeMissing`: the route left the config, so posts to the hook are refused. */
+  @Get("hooks")
+  async listHooks(@Req() req: SessionRequest) {
+    const { tenantId } = req.session!;
+    const [hooks, active] = await Promise.all([
+      this.hooks.list(tenantId),
+      this.configs.getActive(tenantId),
+    ]);
+    const routes = active?.config.routes ?? {};
+    return hooks.map((hook) => ({ ...hook, routeMissing: !ownValue(routes, hook.routeId) }));
+  }
+
+  /** The path holds the token and is returned once: it is the only credential of the hook. */
+  @Post("hooks")
+  async createHook(@Req() req: SessionRequest, @Body() body: unknown) {
+    const { name, route } = parseBody(hookBody, body);
+    const { tenantId } = req.session!;
+    const routes = (await this.configs.getActive(tenantId))?.config.routes ?? {};
+    if (!ownValue(routes, route)) {
+      throw new NotFoundException(`Route "${route}" is not in the active config`);
+    }
+    const { token, info } = await this.hooks.create(tenantId, name, route);
+    return { path: `/v1/hooks/${token}`, ...info };
+  }
+
+  @Delete("hooks/:name")
+  @HttpCode(204)
+  async revokeHook(@Req() req: SessionRequest, @Param("name") name: string): Promise<void> {
+    if (!(await this.hooks.revoke(req.session!.tenantId, name))) throw new NotFoundException();
   }
 
   // ---- Config and integrations ----

@@ -29,6 +29,14 @@ export const placeRefSchema = z
   .regex(PLACE_REF, "must be a reference like place:…")
   .transform((v) => v as PlaceRef);
 
+/** Whom a notification is for: a person, a team or a place. */
+export const recipientSchema = z.union([refSchema(REF_KINDS), placeRefSchema]);
+
+/** The place a recipient names, or `undefined` when it is a person or a team. */
+export function placeOf(recipient: string): string | undefined {
+  return PLACE_REF.exec(recipient)?.[1];
+}
+
 /** A notification's recipients: the people and teams it is for, and the places it names. */
 export function splitRecipients(recipients: readonly string[]): {
   people: Ref[];
@@ -37,7 +45,7 @@ export function splitRecipients(recipients: readonly string[]): {
   const people: Ref[] = [];
   const places: string[] = [];
   for (const recipient of recipients) {
-    const place = PLACE_REF.exec(recipient)?.[1];
+    const place = placeOf(recipient);
     if (place === undefined) people.push(recipient as Ref);
     else places.push(place);
   }
