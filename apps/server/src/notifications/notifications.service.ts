@@ -1,4 +1,5 @@
 import {
+  Logger,
   ConflictException,
   Inject,
   Injectable,
@@ -6,8 +7,18 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { ownValue } from "@callog/config-schema";
-import { and, eq, gt, lte } from "drizzle-orm";
+import {
+  DIRECT_ROUTE,
+  findRoute,
+  isMoreUrgent,
+  ownValue,
+  parseRef,
+  placeOf,
+  splitRecipients,
+  type Route,
+} from "@callog/config-schema";
+import { renderGroupKey, renderRouteRecipients, TemplateRenderError } from "@callog/templates";
+import { and, desc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { AuditService, type AuditActor } from "../audit/audit.service";
 import { sha256Hex } from "../crypto/digest";
 import { DB, type Db } from "../db/db";
@@ -17,7 +28,8 @@ import { QueueService } from "../queue/queue.service";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
 import { MetricsService } from "../metrics/metrics.service";
 import { DataValidator } from "./data-validator";
-import type { NotifyRequest } from "./notify-request";
+import { GROUP_THREAD_PREFIX, MAX_RECIPIENTS, type NotifyRequest } from "./notify-request";
+import { TraceService } from "./trace.service";
 
 export const DELIVER_TASK = "notification.deliver";
 /**
@@ -37,11 +49,15 @@ export interface Accepted {
   replayed: boolean;
 }
 
+type Transaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 /** Rolls back the insert transaction when another request already holds the idempotency key. */
 class IdempotencyRace extends Error {}
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly configs: TenantConfigService,
@@ -50,6 +66,7 @@ export class NotificationsService {
     private readonly queue: QueueService,
     private readonly metrics: MetricsService,
     private readonly audit: AuditService,
+    private readonly trace: TraceService,
   ) {}
 
   async accept(
@@ -68,9 +85,27 @@ export class NotificationsService {
     const active = await this.configs.getActive(producer.tenantId);
     if (!active)
       throw new ServiceUnavailableException("No valid config is loaded for this organization");
-    const route = ownValue(active.config.routes, request.route);
+    const route = findRoute(active.config, request.route);
     if (!route) throw new NotFoundException(`Route "${request.route}" not found`);
     this.auth.assertAllowed(route, producer);
+
+    const isKnownPlace = (name: string) => ownValue(active.config.places, name) !== undefined;
+    const unknownPlaces = splitRecipients(request.recipients).places.filter(
+      (name) => !isKnownPlace(name),
+    );
+    if (unknownPlaces.length > 0) {
+      throw new UnprocessableEntityException({
+        message: "recipients name places that are not in places.yaml",
+        places: unknownPlaces,
+      });
+    }
+
+    const urgency = request.urgency ?? route.urgency.default;
+    if (isMoreUrgent(urgency, route.urgency.max)) {
+      throw new UnprocessableEntityException(
+        `Route "${route.id}" takes urgency up to ${route.urgency.max}`,
+      );
+    }
 
     if (route.schema) {
       const issues = this.dataValidator.validate(
@@ -86,8 +121,28 @@ export class NotificationsService {
       }
     }
 
+    // The route's own recipients come from data the sender may not control, so the ones
+    // that lead nowhere are dropped instead of failing the request.
+    const recipients = [
+      ...new Set([
+        ...request.recipients,
+        ...(
+          this.renderLeniently(route, "recipients", () =>
+            renderRouteRecipients(route, request.data),
+          ) ?? []
+        ).filter((recipient) => {
+          const place = placeOf(recipient);
+          return place === undefined || isKnownPlace(place);
+        }),
+      ]),
+    ].slice(0, MAX_RECIPIENTS);
+    if (route.id === DIRECT_ROUTE.id && recipients.length === 0) {
+      throw new UnprocessableEntityException("The direct route needs recipients");
+    }
+
     try {
       const notificationId = await this.db.transaction(async (tx) => {
+        const thread = await this.threadOf(tx, producer.tenantId, route, request);
         const [notification] = await tx
           .insert(notifications)
           .values({
@@ -96,9 +151,9 @@ export class NotificationsService {
             configVersionId: active.versionId,
             source: producer.source,
             data: request.data,
-            recipients: request.recipients,
-            threadKey: request.thread_key,
-            update: request.update,
+            recipients,
+            urgency,
+            ...thread,
           })
           .returning({ id: notifications.id });
         const id = notification!.id;
@@ -118,7 +173,7 @@ export class NotificationsService {
           if (held.length === 0) throw new IdempotencyRace();
         }
 
-        await this.enqueueDelivery(tx, producer.tenantId, id, request.thread_key);
+        await this.enqueueDelivery(tx, producer.tenantId, id, thread.threadKey);
         return id;
       });
       this.metrics.notificationsReceived.inc({ route: route.id });
@@ -139,23 +194,32 @@ export class NotificationsService {
       .from(notifications)
       .where(and(eq(notifications.tenantId, tenantId), eq(notifications.id, notificationId)));
     if (!notification) throw new NotFoundException("Notification not found");
-    const rows = await this.db
-      .select()
-      .from(deliveries)
-      .where(eq(deliveries.notificationId, notificationId));
+    const trace = await this.trace.of(notification);
     return {
       id: notification.id,
       route: notification.routeId,
       status: notification.status,
       thread_key: notification.threadKey,
+      urgency: notification.urgency,
       created_at: notification.createdAt,
-      deliveries: rows.map((d) => ({
+      group: trace.group,
+      /**
+       * Which of the recipients the sender named led nowhere. What is known about people —
+       * their names, their accounts, what they muted — is for admins, not for senders.
+       */
+      notes: trace.notes
+        .filter((note) => parseRef(note.recipient.ref).kind !== "person")
+        .map(({ recipient, ...note }) => ({ recipient: recipient.ref, ...note })),
+      deliveries: trace.deliveries.map((d) => ({
+        id: d.id,
         provider: d.provider,
         destination: d.destination,
         status: d.status,
         attempts: d.attempts,
         last_error: d.lastError,
         sent_at: d.sentAt,
+        /** The delivery that took over when this one could not be delivered. */
+        fallback_to: d.fallbackTo,
       })),
     };
   }
@@ -180,7 +244,14 @@ export class NotificationsService {
       const retried = await tx
         .update(deliveries)
         .set({ status: "pending" })
-        .where(and(eq(deliveries.notificationId, notificationId), eq(deliveries.status, "failed")))
+        .where(
+          and(
+            eq(deliveries.notificationId, notificationId),
+            eq(deliveries.status, "failed"),
+            // What another delivery took over is not sent a second time.
+            isNull(deliveries.fallbackTo),
+          ),
+        )
         .returning({ id: deliveries.id });
       await tx
         .update(notifications)
@@ -197,6 +268,62 @@ export class NotificationsService {
         tx,
       );
     });
+  }
+
+  /**
+   * The thread the notification goes to. A sender that names a thread keeps it. Otherwise a
+   * route that groups puts repeats of the same key into one thread, each repeat editing its
+   * first message, until the window after that first message is over.
+   */
+  private async threadOf(tx: Transaction, tenantId: string, route: Route, request: NotifyRequest) {
+    const fromRequest = { threadKey: request.thread_key, update: request.update };
+    if (!route.group || request.thread_key) return fromRequest;
+    const groupKey = this.renderLeniently(route, "group key", () =>
+      renderGroupKey(route, request.data),
+    );
+    if (groupKey === undefined) return fromRequest;
+
+    // Repeats come in bursts: one at a time per group, so two of them cannot both open it.
+    const group = `${tenantId}:${route.id}:${groupKey}`;
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${group}, 0))`);
+    const openedAt = sql<Date>`min(${notifications.createdAt})`;
+    const [latest] = await tx
+      .select({ threadKey: notifications.threadKey, openedAt })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.tenantId, tenantId),
+          eq(notifications.routeId, route.id),
+          eq(notifications.groupKey, groupKey),
+        ),
+      )
+      .groupBy(notifications.threadKey)
+      .orderBy(desc(openedAt))
+      .limit(1);
+    const open =
+      latest !== undefined &&
+      new Date(latest.openedAt).getTime() > Date.now() - route.group.window * 1000;
+    return open
+      ? { threadKey: latest.threadKey, update: true, groupKey }
+      : {
+          threadKey: `${GROUP_THREAD_PREFIX}${route.id}:${sha256Hex(groupKey).slice(0, 16)}:${Date.now()}`,
+          update: false,
+          groupKey,
+        };
+  }
+
+  /**
+   * Config validation renders a route's expressions on its examples, but real data can
+   * still break one. The sender cannot fix that, so the notification goes on without it.
+   */
+  private renderLeniently<T>(route: Route, what: string, render: () => T): T | undefined {
+    try {
+      return render();
+    } catch (err) {
+      if (!(err instanceof TemplateRenderError)) throw err;
+      this.logger.warn(`Route "${route.id}" ${what} was not rendered: ${err.message}`);
+      return undefined;
+    }
   }
 
   /** Queued per thread: messages of one thread go out strictly in order. */

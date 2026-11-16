@@ -1,18 +1,19 @@
 import { Module } from "@nestjs/common";
+import { ChannelsModule } from "../channels/channels.module";
 import { IdentityModule } from "../identity/identity.module";
 import { RoutingModule } from "../routing/routing.module";
-import { SlackModule } from "../slack/slack.module";
-import { TelegramModule } from "../telegram/telegram.module";
 import { TenantConfigModule } from "../tenant-config/tenant-config.module";
 import { DeliveryService } from "./delivery.service";
 import { DeliveryWorker } from "./delivery.worker";
+import { PersonalCopies } from "./personal-copies";
 import { DESTINATION_RATE_LIMITER, DestinationRateLimiter } from "./rate-limiter";
 
 @Module({
-  imports: [TenantConfigModule, RoutingModule, SlackModule, TelegramModule, IdentityModule],
+  imports: [TenantConfigModule, RoutingModule, ChannelsModule, IdentityModule],
   providers: [
     DeliveryService,
     DeliveryWorker,
+    PersonalCopies,
     { provide: DESTINATION_RATE_LIMITER, useFactory: () => new DestinationRateLimiter() },
   ],
 })

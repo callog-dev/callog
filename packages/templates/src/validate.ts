@@ -6,6 +6,7 @@ import {
   type Route,
 } from "@callog/config-schema";
 import { TemplateRenderError } from "./engine";
+import { renderGroupKey, renderRouteRecipients } from "./recipients";
 import { renderSlack } from "./slack";
 import { renderTelegram } from "./telegram";
 
@@ -23,9 +24,10 @@ export function validateRouteTemplates(route: Route): TemplateIssue[] {
   const issues: TemplateIssue[] = [];
   inputs.forEach((input, i) => {
     try {
+      renderRouteRecipients(route, input.data);
+      renderGroupKey(route, input.data);
       renderSlack(route, input);
-      // Without a neutral template the route cannot target Telegram (config-schema enforces it).
-      if (route.template) renderTelegram(route, input);
+      renderTelegram(route, input);
     } catch (err) {
       if (!(err instanceof TemplateRenderError)) throw err;
       const prefix = route.examples.length > 0 ? `example ${i}: ` : "";

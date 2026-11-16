@@ -20,6 +20,8 @@ export type MentionResolver = (ref: Ref) => string | readonly string[] | undefin
 export interface RenderInput {
   data: Record<string, unknown>;
   recipients: Ref[];
+  /** Names of the people a message stands for, when it is posted in place of their copies. */
+  fallback_for?: string[];
 }
 
 export interface RenderResult<M> {
@@ -49,7 +51,7 @@ export function renderAt(path: (string | number)[], render: () => string): strin
   }
 }
 
-/** URLs that come from data must be http(s) (buttons and markdown links). */
+/** URLs that come from data must be http(s) (actions and markdown links). */
 export const HTTP_URL = /^https?:\/\/\S+$/i;
 /** Private Use Area characters markdown.ts uses as placeholders; never taken from data. */
 const PLACEHOLDER_CHARS = /[\uE000-\uE004]/g;
@@ -140,6 +142,11 @@ export function createEngine(options: EngineOptions): Liquid {
   });
 
   return engine;
+}
+
+/** For strings that hold no markup: nothing is escaped, a mention is the person's name. */
+export function createPlainEngine(): Liquid {
+  return createEngine({ escape: (text) => text, mention: undefined, unmapped: new Set() });
 }
 
 export function renderString(engine: Liquid, source: string, ctx: RenderContext): string {

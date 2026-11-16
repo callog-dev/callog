@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, Plus } from "lucide-react";
+import { KeyRound, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
 import { actionsColumn, DataTable, type ColumnDef } from "@/components/data-table";
+import { SecretOnce } from "@/components/secret-once";
 import { EmptyState, ErrorState } from "@/components/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { adminApi, type ApiKeyInfo } from "@/lib/api";
 import { ago } from "@/lib/time";
 
@@ -27,9 +29,10 @@ export function ApiKeysTab() {
   const keys = useQuery({ queryKey: ["admin", "api-keys"], queryFn: adminApi.apiKeys });
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [direct, setDirect] = useState(false);
   const [created, setCreated] = useState<string | null>(null);
   const create = useMutation({
-    mutationFn: () => adminApi.createApiKey(name.trim()),
+    mutationFn: () => adminApi.createApiKey(name.trim(), direct),
     onSuccess: (k) => {
       setCreated(k.key);
       void client.invalidateQueries({ queryKey: ["admin", "api-keys"] });
@@ -49,6 +52,7 @@ export function ApiKeysTab() {
     setCreating(false);
     setCreated(null);
     setName("");
+    setDirect(false);
   };
 
   const { mutate: revokeKey } = revoke;
@@ -111,33 +115,28 @@ export function ApiKeysTab() {
             </DialogDescription>
           </DialogHeader>
           {created ? (
-            <div className="flex gap-2">
-              <Input
-                readOnly
-                value={created}
-                className="font-mono text-xs"
-                onFocus={(e) => e.target.select()}
-              />
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label="Copy key"
-                onClick={() =>
-                  navigator.clipboard.writeText(created).then(() => toast.success("Copied"))
-                }
-              >
-                <Copy />
-              </Button>
-            </div>
+            <SecretOnce value={created} label="key" />
           ) : (
-            <div className="space-y-1">
-              <Label htmlFor="key-name">Name</Label>
-              <Input
-                id="key-name"
-                value={name}
-                placeholder="billing"
-                onChange={(e) => setName(e.target.value)}
-              />
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <Label htmlFor="key-name">Name</Label>
+                <Input
+                  id="key-name"
+                  value={name}
+                  placeholder="billing"
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+              <div className="flex items-start gap-3">
+                <Switch id="key-direct" checked={direct} onCheckedChange={setDirect} />
+                <div className="space-y-1">
+                  <Label htmlFor="key-direct">Direct messages</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Lets the key send plain text to any person or place through the built-in{" "}
+                    <code>direct</code> route, without a route in the config.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -164,6 +163,11 @@ function apiKeyColumns(revoke: (key: ApiKeyInfo) => void): ColumnDef<ApiKeyInfo>
         <span className="font-medium">
           <KeyRound className="mr-1 inline size-3.5" />
           {row.original.name}
+          {row.original.direct && (
+            <Badge variant="outline" className="ml-2 font-normal">
+              direct
+            </Badge>
+          )}
         </span>
       ),
     },

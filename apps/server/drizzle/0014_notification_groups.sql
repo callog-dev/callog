@@ -1,0 +1,2 @@
+ALTER TABLE "notifications" ADD COLUMN "group_key" text;--> statement-breakpoint
+CREATE INDEX "notifications_group_idx" ON "notifications" USING btree ("tenant_id","route_id","group_key","created_at");

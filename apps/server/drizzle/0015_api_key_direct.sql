@@ -1,0 +1,1 @@
+ALTER TABLE "api_keys" ADD COLUMN "allow_direct" boolean DEFAULT false NOT NULL;

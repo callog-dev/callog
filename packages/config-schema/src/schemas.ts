@@ -53,6 +53,18 @@ export const teamsFileSchema = z.strictObject({
   teams: z.record(slugSchema, teamSchema).default({}),
 });
 
+/** A room of one channel: a Slack channel (name or id) or a Telegram chat id. */
+export const placeSchema = z.union([
+  z.strictObject({ slack: z.string().min(1) }),
+  z.strictObject({ telegram: z.string().min(1) }),
+]);
+export type Place = z.infer<typeof placeSchema>;
+
+/** Places by name: routes and producers say `deploys`, only this file says where that is. */
+export const placesFileSchema = z.strictObject({
+  places: z.record(slugSchema, placeSchema).default({}),
+});
+
 // Neutral template blocks. Strings are Liquid templates.
 export const blockSchema = z.union([
   z.strictObject({ header: z.string().min(1) }),
@@ -60,17 +72,37 @@ export const blockSchema = z.union([
   z.strictObject({
     fields: z.array(z.strictObject({ label: z.string().min(1), value: z.string() })).min(1),
   }),
-  z.strictObject({
-    buttons: z.array(z.strictObject({ text: z.string().min(1), url: z.string().min(1) })).min(1),
-  }),
   z.strictObject({ context: z.string().min(1) }),
   z.strictObject({ divider: z.literal(true) }),
+  /** Link buttons. */
+  z.strictObject({
+    actions: z.array(z.strictObject({ text: z.string().min(1), url: z.string().min(1) })).min(1),
+  }),
 ]);
 export type Block = z.infer<typeof blockSchema>;
 
+const WINDOW_UNITS = { s: 1, m: 60, h: 3600 } as const;
+const MAX_WINDOW_SECONDS = 24 * 3600;
+
+/** `90s`, `15m`, `2h` — kept as seconds. */
+const windowSchema = z
+  .string()
+  .regex(/^[1-9]\d*[smh]$/, "must be a duration like 90s, 15m or 2h")
+  .transform((v) => Number(v.slice(0, -1)) * WINDOW_UNITS[v.slice(-1) as keyof typeof WINDOW_UNITS])
+  .refine((seconds) => seconds <= MAX_WINDOW_SECONDS, { message: "must be at most 24h" });
+
+/** How much a notification may interrupt, least first. */
+export const URGENCIES = ["low", "normal", "high"] as const;
+export type Urgency = (typeof URGENCIES)[number];
+const urgencySchema = z.enum(URGENCIES);
+
+export function isMoreUrgent(urgency: Urgency, than: Urgency): boolean {
+  return URGENCIES.indexOf(urgency) > URGENCIES.indexOf(than);
+}
+
 export const destinationSchema = z.union([
-  z.strictObject({ slack: z.string().min(1) }),
-  z.strictObject({ telegram: z.string().min(1) }),
+  ...placeSchema.options,
+  z.strictObject({ place: slugSchema }),
   z.strictObject({ team: slugSchema }),
 ]);
 export type Destination = z.infer<typeof destinationSchema>;
@@ -78,43 +110,64 @@ export type Destination = z.infer<typeof destinationSchema>;
 /** Examples are fixtures for CI and previews; they are never resolved to real people. */
 const recipientRefSchema = refSchema(["email", "github", "slack", "telegram", "team", "person"]);
 
-export const routeSchema = z
-  .strictObject({
-    id: slugSchema,
-    description: z.string().optional(),
-    allowed_sources: z
-      .strictObject({
-        github_repos: z
-          .array(z.string().regex(/^[\w.-]+\/[\w.-]+$/, "must be owner/repo"))
-          .default([]),
-        api_keys: z.array(z.string().min(1)).default([]),
-      })
-      .refine((s) => s.github_repos.length + s.api_keys.length > 0, {
-        message: "at least one github_repos or api_keys entry is required",
+export const routeSchema = z.strictObject({
+  id: slugSchema,
+  description: z.string().optional(),
+  /**
+   * Who may send here with a credential of their own. Left out for a route that only hooks
+   * post to: a hook is bound to its route by an admin.
+   */
+  allowed_sources: z
+    .strictObject({
+      github_repos: z
+        .array(z.string().regex(/^[\w.-]+\/[\w.-]+$/, "must be owner/repo"))
+        .default([]),
+      api_keys: z.array(z.string().min(1)).default([]),
+    })
+    .default({ github_repos: [], api_keys: [] }),
+  destinations: z.array(destinationSchema).default([]),
+  /**
+   * For a route without destinations: where a notification is posted when it reaches
+   * nobody else — its recipients name no place and get no personal copy.
+   */
+  default_place: slugSchema.optional(),
+  /**
+   * Recipients the route adds on its own, for senders that cannot name any (inbound
+   * webhooks). Each entry is a Liquid template over `data` that renders to recipients
+   * separated by spaces or commas; anything that is not a recipient is left out.
+   */
+  recipients: z.array(z.string().min(1)).default([]),
+  /**
+   * Repeats of the same thing — an alert that keeps firing — update one message instead
+   * of posting again. `key` is a Liquid template over `data` saying what "the same" is;
+   * a group stays open for `window` after its first notification.
+   */
+  group: z.strictObject({ key: z.string().min(1), window: windowSchema }).optional(),
+  /**
+   * The urgency of the route's notifications: what a sender that names none gets, and the
+   * most a sender may ask for. Recorded with each notification; nothing acts on it yet.
+   */
+  urgency: z
+    .strictObject({ default: urgencySchema.default("normal"), max: urgencySchema.default("high") })
+    .default({ default: "normal", max: "high" }),
+  /** People cannot mute a mandatory route: it reaches them and mentions them regardless. */
+  mandatory: z.boolean().default(false),
+  mentions: z.enum(["recipients", "none"]).default("recipients"),
+  /**
+   * Also send each recipient a personal copy in their preferred channel (Slack or
+   * Telegram, `/notify prefs`). People can mute a route's DMs for themselves.
+   */
+  dm: z.boolean().default(false),
+  /** JSON Schema for `data`; compiled and enforced by the API. */
+  schema: z.record(z.string(), z.unknown()).optional(),
+  template: z.array(blockSchema).min(1),
+  examples: z
+    .array(
+      z.strictObject({
+        data: z.record(z.string(), z.unknown()).default({}),
+        recipients: z.array(recipientRefSchema).default([]),
       }),
-    destinations: z.array(destinationSchema).min(1),
-    mentions: z.enum(["recipients", "none"]).default("recipients"),
-    /**
-     * Also send each recipient a personal copy in their preferred channel (Slack or
-     * Telegram, `/notify prefs`). People can mute a route's DMs for themselves.
-     */
-    dm: z.boolean().default(false),
-    /** JSON Schema for `data`; compiled and enforced by the API. */
-    schema: z.record(z.string(), z.unknown()).optional(),
-    template: z.array(blockSchema).min(1).optional(),
-    /** Escape hatch: raw Slack Block Kit, Liquid applied to strings. */
-    slack_blocks: z.array(z.record(z.string(), z.unknown())).min(1).optional(),
-    examples: z
-      .array(
-        z.strictObject({
-          data: z.record(z.string(), z.unknown()).default({}),
-          recipients: z.array(recipientRefSchema).default([]),
-        }),
-      )
-      .default([]),
-  })
-  .refine((r) => r.template !== undefined || r.slack_blocks !== undefined, {
-    message: "either template or slack_blocks is required",
-    path: ["template"],
-  });
+    )
+    .default([]),
+});
 export type Route = z.infer<typeof routeSchema>;

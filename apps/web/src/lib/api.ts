@@ -39,9 +39,21 @@ export interface RouteSummary {
   id: string;
   description: string | null;
   /** `label` is a human-readable name (Telegram chat title) when the server knows one. */
-  destinations: { provider: "slack" | "telegram"; destination: string; label?: string }[];
+  destinations: {
+    provider: "slack" | "telegram";
+    destination: string;
+    label?: string;
+    /** Posted to only when a notification reaches nobody else. */
+    fallback?: boolean;
+  }[];
   dm: boolean;
+  /** People cannot mute it. */
+  mandatory: boolean;
   mentions: "recipients" | "none";
+  /** Seconds a group of repeats stays open, when the route groups them. */
+  groupWindow: number | null;
+  /** The route names recipients itself, from the notification's data. */
+  addsRecipients: boolean;
   allowedSources: { github_repos: string[]; api_keys: string[] };
   dataFields: string[];
   muted: boolean;
@@ -51,7 +63,6 @@ export interface RouteSummary {
 /** `GET /api/routes/:id`; the extra fields come only for admins. */
 export interface RouteDetails extends RouteSummary {
   template?: unknown;
-  slackBlocks?: unknown;
   examples?: { data?: Record<string, unknown>; recipients?: string[] }[];
   schema?: unknown;
 }
@@ -116,21 +127,46 @@ export interface NotificationRow {
   source:
     | { type: "github_oidc"; repository: string }
     | { type: "api_key"; apiKeyName: string }
+    | { type: "hook"; hookId: string; hookName: string; routeId: string }
     | { type: "admin_test"; actor: string };
   threadKey: string | null;
   createdAt: string;
   deliveries: DeliverySummary[];
 }
 
+/** Someone a trace talks about: the ref, and the person's name when Callog knows them. */
+export interface TracedRecipient {
+  ref: string;
+  name: string;
+}
+
+/** Why a recipient got no message of their own, or no mention. */
+export interface TraceNote {
+  recipient: TracedRecipient;
+  note: "muted" | "no_account" | "unknown" | "empty_team" | "not_mentioned";
+  channel?: string;
+  detail?: string;
+}
+
+export interface TracedDelivery extends DeliverySummary {
+  id: string;
+  attempts: number;
+  lastError: string | null;
+  sentAt: string | null;
+  /** The people a personal copy, or the post that replaced it, is for. */
+  for: TracedRecipient[];
+  /** The delivery that took over when this one could not be delivered. */
+  fallbackTo: string | null;
+}
+
 export interface NotificationDetails extends Omit<NotificationRow, "deliveries"> {
   data: Record<string, unknown>;
   recipients: string[];
   update: boolean;
-  deliveries: (DeliverySummary & {
-    attempts: number;
-    lastError: string | null;
-    sentAt: string | null;
-  })[];
+  /** Set when the route groups repeats: `joined` means this one edited an earlier message. */
+  group: { key: string; joined: boolean } | null;
+  notes: TraceNote[];
+  deliveries: TracedDelivery[];
 }
 
 export interface AdminPerson {
@@ -210,9 +246,35 @@ export interface ApiKeyInfo {
   id: string;
   name: string;
   prefix: string;
+  /** May send to the built-in `direct` route: plain text to any person or place. */
+  direct: boolean;
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
+}
+
+/** An inbound webhook: a secret URL that posts any JSON it receives to one route. */
+export interface HookInfo {
+  id: string;
+  name: string;
+  routeId: string;
+  prefix: string;
+  /** The route left the config, so posts to the hook are refused. */
+  routeMissing: boolean;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+/** A room with a name: what routes and senders call it, and where it is. */
+export interface PlaceInfo {
+  name: string;
+  channel: "slack" | "telegram";
+  room: string;
+  /** Routes that deliver here. */
+  routes: string[];
+  /** Routes that post here when a notification reaches nobody else. */
+  defaultFor: string[];
 }
 
 export interface AdminStatus {
@@ -285,6 +347,7 @@ export interface Onboarding {
     telegram: { done: boolean; optional: true; bot: string | null };
     config: { done: boolean; repo: string; rejected: boolean; errors: ConfigIssue[] };
     firstNotification: { done: boolean };
+    hooks: { done: boolean; optional: true };
   };
   complete: boolean;
 }
@@ -375,8 +438,18 @@ export const adminApi = {
     request<{ ok: true; changed: boolean }>("POST", "/api/admin/admins", { personId }),
   revokeAdmin: (personId: string) => request<void>("DELETE", `/api/admin/admins/${personId}`),
   apiKeys: () => request<ApiKeyInfo[]>("GET", "/api/admin/api-keys"),
-  createApiKey: (name: string) =>
-    request<ApiKeyInfo & { key: string }>("POST", "/api/admin/api-keys", { name }),
+  createApiKey: (name: string, direct: boolean) =>
+    request<ApiKeyInfo & { key: string }>("POST", "/api/admin/api-keys", { name, direct }),
   revokeApiKey: (name: string) =>
     request<void>("DELETE", `/api/admin/api-keys/${encodeURIComponent(name)}`),
+  hooks: () => request<HookInfo[]>("GET", "/api/admin/hooks"),
+  /** `path` holds the token and is returned only here. */
+  createHook: (name: string, route: string) =>
+    request<Omit<HookInfo, "routeMissing"> & { path: string }>("POST", "/api/admin/hooks", {
+      name,
+      route,
+    }),
+  revokeHook: (name: string) =>
+    request<void>("DELETE", `/api/admin/hooks/${encodeURIComponent(name)}`),
+  places: () => request<PlaceInfo[]>("GET", "/api/admin/places"),
 };

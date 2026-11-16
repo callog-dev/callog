@@ -25,9 +25,64 @@ const details = {
   data: { branch: "main" },
   recipients: [],
   update: false,
+  group: null,
+  notes: [],
   deliveries: [
-    { ...row.deliveries[0], attempts: 1, lastError: null, sentAt: "2026-10-31T10:00:01Z" },
-    { ...row.deliveries[1], attempts: 1, lastError: "slack: channel_not_found", sentAt: null },
+    {
+      ...row.deliveries[0],
+      id: "d1",
+      attempts: 1,
+      lastError: null,
+      sentAt: "2026-10-31T10:00:01Z",
+      for: [],
+      fallbackTo: null,
+    },
+    {
+      ...row.deliveries[1],
+      id: "d2",
+      attempts: 1,
+      lastError: "slack: channel_not_found",
+      sentAt: null,
+      for: [],
+      fallbackTo: null,
+    },
+  ],
+};
+
+const person = (name: string) => ({ ref: `person:${name.toLowerCase()}`, name });
+
+/** Alice's copy was refused and went to the team's room; Bob and a stranger were left out. */
+const traced = {
+  ...details,
+  status: "delivered",
+  group: { key: "cpu", joined: true },
+  notes: [
+    { recipient: person("Bob"), note: "muted" },
+    { recipient: { ref: "github:ghost", name: "ghost" }, note: "unknown" },
+  ],
+  deliveries: [
+    {
+      id: "d1",
+      provider: "slack",
+      destination: "dm:UA",
+      status: "failed",
+      attempts: 1,
+      lastError: "slack: cannot_dm_bot",
+      sentAt: null,
+      for: [person("Alice")],
+      fallbackTo: "d2",
+    },
+    {
+      id: "d2",
+      provider: "slack",
+      destination: "#ops",
+      status: "sent",
+      attempts: 1,
+      lastError: null,
+      sentAt: "2026-10-31T10:00:01Z",
+      for: [person("Alice")],
+      fallbackTo: null,
+    },
   ],
 };
 
@@ -63,5 +118,32 @@ describe("DeliveriesTab", () => {
     expect(screen.getByText("Send 1 failed delivery again?")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(retried).toEqual(["n1"]));
+  });
+
+  it("traces a notification: what took over, whom it was for, who was left out", async () => {
+    server.use(
+      http.get("*/api/routes", () =>
+        HttpResponse.json({ configRepo: "acme/notify-config", commitSha: null, routes: [] }),
+      ),
+      http.get("*/api/admin/notifications", () =>
+        HttpResponse.json({ items: [{ ...row, status: "delivered" }], nextBefore: null }),
+      ),
+      http.get("*/api/admin/notifications/:id", () => HttpResponse.json(traced)),
+    );
+    renderPage(
+      <Routes>
+        <Route path="/manage/deliveries/:id?" element={<DeliveriesTab />} />
+      </Routes>,
+      "/manage/deliveries/n1",
+    );
+
+    expect(await screen.findByText("Bob muted this route")).toBeInTheDocument();
+    expect(screen.getByText("github:ghost is nobody Callog knows")).toBeInTheDocument();
+    expect(screen.getAllByText("For Alice")).toHaveLength(2);
+    expect(screen.getByText(/A repeat: it edited the message of its group/)).toBeInTheDocument();
+    // The refused copy was made up for: it is explained, not offered for a retry.
+    expect(screen.getByText("slack: cannot_dm_bot")).not.toHaveClass("text-destructive");
+    expect(screen.getByText(/^Sent to/)).toHaveTextContent("Sent to #ops instead");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 });

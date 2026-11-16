@@ -1,0 +1,1 @@
+ALTER TABLE "notifications" ADD COLUMN "trace" jsonb DEFAULT '[]'::jsonb NOT NULL;

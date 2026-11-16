@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { parseConfigTree, type ConfigTree, type ParseResult } from "./parse";
+import {
+  DIRECT_ROUTE,
+  findRoute,
+  parseConfigTree,
+  type ConfigTree,
+  type ParseResult,
+} from "./parse";
+import { recipientSchema, splitRecipients } from "./refs";
 import { loadFixture } from "./test-utils";
 
 const valid = () => loadFixture("valid");
@@ -87,17 +94,17 @@ describe("parseConfigTree", () => {
     expect(errors[0]?.message).toBe('unknown team "constructor" (not defined in teams.yaml)');
   });
 
-  it("requires at least one allowed source", () => {
+  it("takes a route with no senders of its own: only hooks post to it", () => {
     const route = `
 id: a
-allowed_sources: {}
 destinations: [{ slack: "#x" }]
 template: [{ text: hi }]`;
-    const errors = errorsOf(parseConfigTree({ "routes/a.yaml": route }));
-    expect(errors[0]).toMatchObject({ file: "routes/a.yaml", path: ["allowed_sources"] });
+    const result = parseConfigTree({ "routes/a.yaml": route });
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    expect(result.config.routes.a!.allowed_sources).toEqual({ github_repos: [], api_keys: [] });
   });
 
-  it("requires template or slack_blocks", () => {
+  it("requires a template", () => {
     const route = `
 id: a
 allowed_sources: { api_keys: [ci] }
@@ -122,14 +129,166 @@ destinations: [{ slack: "#x" }]`;
     ]);
   });
 
-  it("requires a neutral template when the route reaches Telegram", () => {
-    const route = `
+  it("tells the places among recipients from people and teams", () => {
+    expect(splitRecipients(["github:octocat", "place:deploys", "team:fe"])).toEqual({
+      people: ["github:octocat", "team:fe"],
+      places: ["deploys"],
+    });
+  });
+
+  describe("places", () => {
+    const places = `
+places:
+  deploys: { slack: "#deploys" }
+  oncall: { telegram: "-100123" }`;
+    const route = (lines: string) => `
 id: a
 allowed_sources: { api_keys: [ci] }
-destinations: [{ telegram: chat }]
-slack_blocks: [{ type: section }]`;
-    const errors = errorsOf(parseConfigTree({ "routes/a.yaml": route }));
-    expect(errors[0]?.message).toContain("Telegram destination requires template");
+template: [{ text: hi }]
+${lines}`;
+
+    it("lets a route deliver to a place by name", () => {
+      const result = parseConfigTree({
+        "places.yaml": places,
+        "routes/a.yaml": route("destinations: [{ place: deploys }]"),
+      });
+      if (!result.ok) throw new Error(JSON.stringify(result.errors));
+      expect(result.config.places).toEqual({
+        deploys: { slack: "#deploys" },
+        oncall: { telegram: "-100123" },
+      });
+      expect(result.warnings).toEqual([]);
+    });
+
+    it("accepts a route with only a default place", () => {
+      const result = parseConfigTree({
+        "places.yaml": places,
+        "routes/a.yaml": route("default_place: deploys"),
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it("requires a destination or a default place", () => {
+      const errors = errorsOf(parseConfigTree({ "routes/a.yaml": route("") }));
+      expect(errors).toEqual([
+        {
+          file: "routes/a.yaml",
+          path: ["destinations"],
+          message: "destinations or default_place is required",
+        },
+      ]);
+    });
+
+    it("rejects places that are not defined", () => {
+      const errors = errorsOf(
+        parseConfigTree({
+          "places.yaml": places,
+          "routes/a.yaml": route("destinations: [{ place: nowhere }]\ndefault_place: gone"),
+        }),
+      );
+      expect(errors).toEqual([
+        {
+          file: "routes/a.yaml",
+          path: ["default_place"],
+          message: 'unknown place "gone" (not defined in places.yaml)',
+        },
+        {
+          file: "routes/a.yaml",
+          path: ["default_place"],
+          message: "default_place is for routes without destinations",
+        },
+        {
+          file: "routes/a.yaml",
+          path: ["destinations", 0, "place"],
+          message: 'unknown place "nowhere" (not defined in places.yaml)',
+        },
+      ]);
+    });
+
+    it("checks the recipients a route writes out, leaving Liquid for the data", () => {
+      const errors = errorsOf(
+        parseConfigTree({
+          "places.yaml": places,
+          "routes/a.yaml": route(`default_place: deploys
+recipients: ["githb:octocat", "place:nowhere", "github:{{ data.x }}", "team:sre", "place:oncall"]`),
+        }),
+      );
+      expect(errors).toEqual([
+        {
+          file: "routes/a.yaml",
+          path: ["recipients", 0],
+          message: "must be a person, a team or place:<name>",
+        },
+        {
+          file: "routes/a.yaml",
+          path: ["recipients", 1],
+          message: 'unknown place "nowhere" (not defined in places.yaml)',
+        },
+      ]);
+    });
+
+    it("rejects a place in two channels at once", () => {
+      const errors = errorsOf(
+        parseConfigTree({ "places.yaml": 'places: { a: { slack: "#a", telegram: "-1" } }' }),
+      );
+      expect(errors[0]).toMatchObject({ file: "places.yaml", path: ["places", "a"] });
+    });
+  });
+
+  it("keeps the built-in route out of the config", () => {
+    const errors = errorsOf(parseConfigTree({ "routes/direct.yaml": minimalRoute("direct") }));
+    expect(errors).toEqual([
+      { file: "routes/direct.yaml", path: ["id"], message: '"direct" is a built-in route' },
+    ]);
+    const config = parseConfigTree({ "routes/a.yaml": minimalRoute("a") });
+    if (!config.ok) throw new Error(JSON.stringify(config.errors));
+    expect(findRoute(config.config, "a")?.id).toBe("a");
+    expect(findRoute(config.config, "direct")).toBe(DIRECT_ROUTE);
+    expect(findRoute(config.config, "constructor")).toBeUndefined();
+  });
+
+  it("records urgency and mandatory, and keeps oncall: for later", () => {
+    const parse = (extra: string) => parseConfigTree({ "routes/a.yaml": minimalRoute("a", extra) });
+    const plain = parse("");
+    if (!plain.ok) throw new Error(JSON.stringify(plain.errors));
+    expect(plain.config.routes.a).toMatchObject({
+      urgency: { default: "normal", max: "high" },
+      mandatory: false,
+    });
+    const set = parse("urgency: { default: low, max: normal }\nmandatory: true");
+    if (!set.ok) throw new Error(JSON.stringify(set.errors));
+    expect(set.config.routes.a).toMatchObject({
+      urgency: { default: "low", max: "normal" },
+      mandatory: true,
+    });
+    expect(errorsOf(parse("urgency: { default: high, max: low }"))).toEqual([
+      { file: "routes/a.yaml", path: ["urgency", "default"], message: "must not be above max" },
+    ]);
+    expect(recipientSchema.safeParse("oncall:sre").error?.issues[0]?.message).toBe(
+      "oncall: recipients are reserved for a later release",
+    );
+    expect(recipientSchema.safeParse("team:sre").success).toBe(true);
+  });
+
+  it("reads the grouping window as seconds", () => {
+    const parse = (window: string) =>
+      parseConfigTree({
+        "routes/a.yaml": minimalRoute("a", `group: { key: "{{ data.alert }}", window: ${window} }`),
+      });
+    const result = parse("15m");
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    expect(result.config.routes.a!.group).toEqual({ key: "{{ data.alert }}", window: 900 });
+    expect(errorsOf(parse("soon"))[0]?.message).toBe("must be a duration like 90s, 15m or 2h");
+    expect(errorsOf(parse("25h"))[0]?.message).toBe("must be at most 24h");
+  });
+
+  it("rejects raw Slack blocks", () => {
+    const errors = errorsOf(
+      parseConfigTree({
+        "routes/a.yaml": minimalRoute("a", "slack_blocks: [{ type: section }]"),
+      }),
+    );
+    expect(errors[0]?.message).toContain('"slack_blocks"');
   });
 
   it("rejects malformed recipient refs in examples", () => {

@@ -92,6 +92,48 @@
       "when": 1792259969441,
       "tag": "0012_telegram_chats",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794719162405,
+      "tag": "0013_hooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794720321115,
+      "tag": "0014_notification_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794720712204,
+      "tag": "0015_api_key_direct",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794762729211,
+      "tag": "0016_delivery_fallbacks",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794766043987,
+      "tag": "0017_notification_trace",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794804600788,
+      "tag": "0018_notification_urgency",
+      "breakpoints": true
     }
   ]
 }

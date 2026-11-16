@@ -1,6 +1,5 @@
 import { routeSchema, type Route } from "@callog/config-schema";
 import { describe, expect, it } from "vitest";
-import { TemplateRenderError } from "./engine";
 import { renderTelegram } from "./telegram";
 
 const route = (input: Record<string, unknown>): Route =>
@@ -22,7 +21,7 @@ describe("renderTelegram", () => {
         { fields: [{ label: "Branch", value: "`{{ data.branch }}`" }] },
         { context: "ctx" },
         { divider: true },
-        { buttons: [{ text: "Open", url: "https://x.dev/{{ data.n }}" }] },
+        { actions: [{ text: "Open", url: "https://x.dev/{{ data.n }}" }] },
       ],
     });
     const { message, unmapped } = renderTelegram(
@@ -60,11 +59,6 @@ describe("renderTelegram", () => {
     expect(message.text).toBe('<a href="https://a.dev/%22onclick=%22x">a</a> b');
   });
 
-  it("refuses routes with only slack_blocks", () => {
-    const r = route({ slack_blocks: [{ type: "divider" }] });
-    expect(() => renderTelegram(r, { data: {}, recipients: [] })).toThrow(TemplateRenderError);
-  });
-
   it("drops trailing blocks instead of cutting HTML when the text is too long", () => {
     const r = route({ template: [{ text: "{{ data.a }}" }, { text: "{{ data.b }}" }] });
     const { message } = renderTelegram(r, {
@@ -84,8 +78,8 @@ describe("renderTelegram", () => {
   });
 
   it("groups buttons three per row", () => {
-    const buttons = Array.from({ length: 4 }, (_, i) => ({ text: `B${i}`, url: "https://x.dev" }));
-    const { message } = renderTelegram(route({ template: [{ buttons }] }), {
+    const actions = Array.from({ length: 4 }, (_, i) => ({ text: `B${i}`, url: "https://x.dev" }));
+    const { message } = renderTelegram(route({ template: [{ actions }] }), {
       data: {},
       recipients: [],
     });

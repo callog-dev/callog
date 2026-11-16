@@ -1,13 +1,17 @@
 import { parseDocument } from "yaml";
 import { compileDataSchema, dataIssues } from "./data-schema";
+import { placeOf, recipientSchema } from "./refs";
 import type { z } from "zod";
 import {
   configFileSchema,
+  placesFileSchema,
   REMOVED_FILES,
   REMOVED_KEYS,
   routeSchema,
+  isMoreUrgent,
   teamsFileSchema,
   type ConfigFile,
+  type Place,
   type Route,
   type Team,
 } from "./schemas";
@@ -15,6 +19,7 @@ import {
 export interface Config {
   config: ConfigFile;
   teams: Record<string, Team>;
+  places: Record<string, Place>;
   routes: Record<string, Route>;
 }
 
@@ -24,6 +29,35 @@ export interface Config {
  */
 export function ownValue<T>(record: Record<string, T>, key: string): T | undefined {
   return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+/**
+ * The route every organization has without writing it: plain text to the people and places
+ * the sender names. People get it as a personal message. Who may use it is a property of
+ * the API key, not of the config.
+ */
+export const DIRECT_ROUTE: Route = {
+  id: "direct",
+  description: "Plain text to the recipients the sender names",
+  allowed_sources: { github_repos: [], api_keys: [] },
+  destinations: [],
+  recipients: [],
+  urgency: { default: "normal", max: "high" },
+  mandatory: false,
+  mentions: "none",
+  dm: true,
+  schema: {
+    type: "object",
+    required: ["text"],
+    properties: { text: { type: "string", minLength: 1 } },
+  },
+  template: [{ text: "{{ data.text }}" }],
+  examples: [],
+};
+
+/** A route of the config, or the built-in one. */
+export function findRoute(config: Config, id: string): Route | undefined {
+  return id === DIRECT_ROUTE.id ? DIRECT_ROUTE : ownValue(config.routes, id);
 }
 
 export interface ConfigIssue {
@@ -47,7 +81,7 @@ export type ParseResult =
 /** Raw config repo contents: repo-relative path → file text. */
 export type ConfigTree = Record<string, string>;
 
-const ROOT_FILES = ["config.yaml", "teams.yaml"] as const;
+const ROOT_FILES = ["config.yaml", "teams.yaml", "places.yaml"] as const;
 const ROUTE_FILE = /^routes\/([^/]+)\.ya?ml$/;
 
 /**
@@ -60,6 +94,7 @@ export function parseConfigTree(tree: ConfigTree): ParseResult {
 
   const config = parseFile(tree, "config.yaml", configFileSchema, errors);
   const teamsFile = parseFile(tree, "teams.yaml", teamsFileSchema, errors);
+  const placesFile = parseFile(tree, "places.yaml", placesFileSchema, errors);
   for (const [file, message] of Object.entries(REMOVED_FILES)) {
     if (file in tree) errors.push({ file, path: [], message });
   }
@@ -81,6 +116,10 @@ export function parseConfigTree(tree: ConfigTree): ParseResult {
       errors.push({ file, path: ["id"], message: `must match the file name "${match[1]}"` });
       continue;
     }
+    if (route.id === DIRECT_ROUTE.id) {
+      errors.push({ file, path: ["id"], message: `"${route.id}" is a built-in route` });
+      continue;
+    }
     const defined = ownValue(routeFiles, route.id);
     if (defined) {
       errors.push({
@@ -95,13 +134,14 @@ export function parseConfigTree(tree: ConfigTree): ParseResult {
   }
 
   const teams = teamsFile?.teams ?? {};
+  const places = placesFile?.places ?? {};
 
-  checkRoutes(routes, routeFiles, teams, errors);
+  checkRoutes(routes, routeFiles, teams, places, errors);
 
   if (errors.length > 0) return { ok: false, errors, warnings };
   return {
     ok: true,
-    config: { config: config ?? configFileSchema.parse({}), teams, routes },
+    config: { config: config ?? configFileSchema.parse({}), teams, places, routes },
     warnings,
     routeFiles,
   };
@@ -167,14 +207,48 @@ function checkRoutes(
   routes: Record<string, Route>,
   routeFiles: Record<string, string>,
   teams: Record<string, Team>,
+  places: Record<string, Place>,
   errors: ConfigIssue[],
 ): void {
   for (const [id, route] of Object.entries(routes)) {
     const file = routeFiles[id]!;
+    const checkPlace = (path: (string | number)[], name: string) => {
+      if (ownValue(places, name)) return;
+      errors.push({ file, path, message: `unknown place "${name}" (not defined in places.yaml)` });
+    };
     checkDataSchema(route, file, errors);
-    let needsTelegram = false;
+    if (isMoreUrgent(route.urgency.default, route.urgency.max)) {
+      errors.push({ file, path: ["urgency", "default"], message: "must not be above max" });
+    }
+    if (route.default_place) {
+      checkPlace(["default_place"], route.default_place);
+      if (route.destinations.length > 0) {
+        errors.push({
+          file,
+          path: ["default_place"],
+          message: "default_place is for routes without destinations",
+        });
+      }
+    } else if (route.destinations.length === 0) {
+      errors.push({
+        file,
+        path: ["destinations"],
+        message: "destinations or default_place is required",
+      });
+    }
+    route.recipients.forEach((recipient, i) => {
+      // What Liquid renders is only known with data; what is written out is checked here.
+      if (/\{[{%]/.test(recipient)) return;
+      const path = ["recipients", i];
+      if (!recipientSchema.safeParse(recipient).success) {
+        errors.push({ file, path, message: "must be a person, a team or place:<name>" });
+        return;
+      }
+      const place = placeOf(recipient);
+      if (place !== undefined) checkPlace(path, place);
+    });
     route.destinations.forEach((destination, i) => {
-      if ("telegram" in destination) needsTelegram = true;
+      if ("place" in destination) checkPlace(["destinations", i, "place"], destination.place);
       if (!("team" in destination)) return;
       const team = ownValue(teams, destination.team);
       if (!team) {
@@ -192,16 +266,7 @@ function checkRoutes(
           message: `team "${destination.team}" has neither slack_channel nor telegram_chat`,
         });
       }
-      if (team.telegram_chat) needsTelegram = true;
     });
-    // slack_blocks only render to Slack; Telegram needs the neutral template.
-    if (needsTelegram && !route.template) {
-      errors.push({
-        file,
-        path: ["template"],
-        message: "a Telegram destination requires template (slack_blocks render only to Slack)",
-      });
-    }
   }
 }
 

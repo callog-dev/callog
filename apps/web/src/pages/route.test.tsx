@@ -11,7 +11,10 @@ const summary = {
   description: "e2e failures",
   destinations: [{ provider: "slack", destination: "#alerts" }],
   dm: false,
+  mandatory: false,
   mentions: "recipients",
+  groupWindow: null,
+  addsRecipients: false,
   allowedSources: { github_repos: ["acme/e2e"], api_keys: [] },
   dataFields: ["branch"],
   muted: false,
@@ -36,6 +39,25 @@ describe("RoutePage", () => {
     page(true);
     expect(await screen.findByText("Template and examples")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send test" })).toBeInTheDocument();
+  });
+
+  it("explains a route that hooks post to: its fallback, its own recipients, its repeats", async () => {
+    server.use(
+      http.get("*/api/routes/e2e", () =>
+        HttpResponse.json({
+          ...summary,
+          destinations: [{ provider: "slack", destination: "#lost", fallback: true }],
+          allowedSources: { github_repos: [], api_keys: [] },
+          groupWindow: 900,
+          addsRecipients: true,
+        }),
+      ),
+    );
+    page(false);
+    expect(await screen.findByText("when it reaches nobody else")).toBeInTheDocument();
+    expect(screen.getByText("hooks only")).toBeInTheDocument();
+    expect(screen.getByText("Also taken from the data of each notification")).toBeInTheDocument();
+    expect(screen.getByText(/Edit one message for 15 min after the first/)).toBeInTheDocument();
   });
 
   it("shows engineers the route without them", async () => {

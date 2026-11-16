@@ -37818,15 +37818,39 @@ var require_refs = __commonJS({
   "../config-schema/dist/refs.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.slugSchema = exports2.REF_KINDS = void 0;
+    exports2.recipientSchema = exports2.placeRefSchema = exports2.slugSchema = exports2.REF_KINDS = void 0;
     exports2.refSchema = refSchema;
+    exports2.placeOf = placeOf;
+    exports2.splitRecipients = splitRecipients;
     exports2.parseRef = parseRef;
     var zod_1 = require_zod();
     exports2.REF_KINDS = ["email", "github", "slack", "telegram", "team", "person"];
-    exports2.slugSchema = zod_1.z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "must be lowercase letters, digits and dashes");
+    var SLUG = "[a-z0-9][a-z0-9-]*";
+    exports2.slugSchema = zod_1.z.string().regex(new RegExp(`^${SLUG}$`), "must be lowercase letters, digits and dashes");
     function refSchema(kinds) {
       const pattern = new RegExp(`^(${kinds.join("|")}):\\S+$`);
       return zod_1.z.string().regex(pattern, `must be a reference like ${kinds.map((k) => `${k}:\u2026`).join(", ")}`).transform((v) => v);
+    }
+    var PLACE_REF = new RegExp(`^place:(${SLUG})$`);
+    exports2.placeRefSchema = zod_1.z.string().regex(PLACE_REF, "must be a reference like place:\u2026").transform((v) => v);
+    var RESERVED_KIND = "oncall:";
+    exports2.recipientSchema = zod_1.z.string().refine((ref) => !ref.startsWith(RESERVED_KIND), {
+      message: `${RESERVED_KIND} recipients are reserved for a later release`
+    }).pipe(zod_1.z.union([refSchema(exports2.REF_KINDS), exports2.placeRefSchema]));
+    function placeOf(recipient) {
+      return PLACE_REF.exec(recipient)?.[1];
+    }
+    function splitRecipients(recipients) {
+      const people = [];
+      const places = [];
+      for (const recipient of recipients) {
+        const place = placeOf(recipient);
+        if (place === void 0)
+          people.push(recipient);
+        else
+          places.push(place);
+      }
+      return { people, places };
     }
     function parseRef(ref) {
       const i = ref.indexOf(":");
@@ -37840,7 +37864,8 @@ var require_schemas3 = __commonJS({
   "../config-schema/dist/schemas.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.routeSchema = exports2.destinationSchema = exports2.blockSchema = exports2.teamsFileSchema = exports2.teamSchema = exports2.configFileSchema = exports2.REMOVED_FILES = exports2.REMOVED_KEYS = void 0;
+    exports2.routeSchema = exports2.destinationSchema = exports2.URGENCIES = exports2.blockSchema = exports2.placesFileSchema = exports2.placeSchema = exports2.teamsFileSchema = exports2.teamSchema = exports2.configFileSchema = exports2.REMOVED_FILES = exports2.REMOVED_KEYS = void 0;
+    exports2.isMoreUrgent = isMoreUrgent;
     var zod_1 = require_zod();
     var refs_1 = require_refs();
     exports2.REMOVED_KEYS = {
@@ -37872,34 +37897,76 @@ var require_schemas3 = __commonJS({
     exports2.teamsFileSchema = zod_1.z.strictObject({
       teams: zod_1.z.record(refs_1.slugSchema, exports2.teamSchema).default({})
     });
+    exports2.placeSchema = zod_1.z.union([
+      zod_1.z.strictObject({ slack: zod_1.z.string().min(1) }),
+      zod_1.z.strictObject({ telegram: zod_1.z.string().min(1) })
+    ]);
+    exports2.placesFileSchema = zod_1.z.strictObject({
+      places: zod_1.z.record(refs_1.slugSchema, exports2.placeSchema).default({})
+    });
     exports2.blockSchema = zod_1.z.union([
       zod_1.z.strictObject({ header: zod_1.z.string().min(1) }),
       zod_1.z.strictObject({ text: zod_1.z.string().min(1) }),
       zod_1.z.strictObject({
         fields: zod_1.z.array(zod_1.z.strictObject({ label: zod_1.z.string().min(1), value: zod_1.z.string() })).min(1)
       }),
-      zod_1.z.strictObject({
-        buttons: zod_1.z.array(zod_1.z.strictObject({ text: zod_1.z.string().min(1), url: zod_1.z.string().min(1) })).min(1)
-      }),
       zod_1.z.strictObject({ context: zod_1.z.string().min(1) }),
-      zod_1.z.strictObject({ divider: zod_1.z.literal(true) })
+      zod_1.z.strictObject({ divider: zod_1.z.literal(true) }),
+      /** Link buttons. */
+      zod_1.z.strictObject({
+        actions: zod_1.z.array(zod_1.z.strictObject({ text: zod_1.z.string().min(1), url: zod_1.z.string().min(1) })).min(1)
+      })
     ]);
+    var WINDOW_UNITS = { s: 1, m: 60, h: 3600 };
+    var MAX_WINDOW_SECONDS = 24 * 3600;
+    var windowSchema = zod_1.z.string().regex(/^[1-9]\d*[smh]$/, "must be a duration like 90s, 15m or 2h").transform((v) => Number(v.slice(0, -1)) * WINDOW_UNITS[v.slice(-1)]).refine((seconds) => seconds <= MAX_WINDOW_SECONDS, { message: "must be at most 24h" });
+    exports2.URGENCIES = ["low", "normal", "high"];
+    var urgencySchema = zod_1.z.enum(exports2.URGENCIES);
+    function isMoreUrgent(urgency, than) {
+      return exports2.URGENCIES.indexOf(urgency) > exports2.URGENCIES.indexOf(than);
+    }
     exports2.destinationSchema = zod_1.z.union([
-      zod_1.z.strictObject({ slack: zod_1.z.string().min(1) }),
-      zod_1.z.strictObject({ telegram: zod_1.z.string().min(1) }),
+      ...exports2.placeSchema.options,
+      zod_1.z.strictObject({ place: refs_1.slugSchema }),
       zod_1.z.strictObject({ team: refs_1.slugSchema })
     ]);
     var recipientRefSchema = (0, refs_1.refSchema)(["email", "github", "slack", "telegram", "team", "person"]);
     exports2.routeSchema = zod_1.z.strictObject({
       id: refs_1.slugSchema,
       description: zod_1.z.string().optional(),
+      /**
+       * Who may send here with a credential of their own. Left out for a route that only hooks
+       * post to: a hook is bound to its route by an admin.
+       */
       allowed_sources: zod_1.z.strictObject({
         github_repos: zod_1.z.array(zod_1.z.string().regex(/^[\w.-]+\/[\w.-]+$/, "must be owner/repo")).default([]),
         api_keys: zod_1.z.array(zod_1.z.string().min(1)).default([])
-      }).refine((s) => s.github_repos.length + s.api_keys.length > 0, {
-        message: "at least one github_repos or api_keys entry is required"
-      }),
-      destinations: zod_1.z.array(exports2.destinationSchema).min(1),
+      }).default({ github_repos: [], api_keys: [] }),
+      destinations: zod_1.z.array(exports2.destinationSchema).default([]),
+      /**
+       * For a route without destinations: where a notification is posted when it reaches
+       * nobody else — its recipients name no place and get no personal copy.
+       */
+      default_place: refs_1.slugSchema.optional(),
+      /**
+       * Recipients the route adds on its own, for senders that cannot name any (inbound
+       * webhooks). Each entry is a Liquid template over `data` that renders to recipients
+       * separated by spaces or commas; anything that is not a recipient is left out.
+       */
+      recipients: zod_1.z.array(zod_1.z.string().min(1)).default([]),
+      /**
+       * Repeats of the same thing — an alert that keeps firing — update one message instead
+       * of posting again. `key` is a Liquid template over `data` saying what "the same" is;
+       * a group stays open for `window` after its first notification.
+       */
+      group: zod_1.z.strictObject({ key: zod_1.z.string().min(1), window: windowSchema }).optional(),
+      /**
+       * The urgency of the route's notifications: what a sender that names none gets, and the
+       * most a sender may ask for. Recorded with each notification; nothing acts on it yet.
+       */
+      urgency: zod_1.z.strictObject({ default: urgencySchema.default("normal"), max: urgencySchema.default("high") }).default({ default: "normal", max: "high" }),
+      /** People cannot mute a mandatory route: it reaches them and mentions them regardless. */
+      mandatory: zod_1.z.boolean().default(false),
       mentions: zod_1.z.enum(["recipients", "none"]).default("recipients"),
       /**
        * Also send each recipient a personal copy in their preferred channel (Slack or
@@ -37908,16 +37975,11 @@ var require_schemas3 = __commonJS({
       dm: zod_1.z.boolean().default(false),
       /** JSON Schema for `data`; compiled and enforced by the API. */
       schema: zod_1.z.record(zod_1.z.string(), zod_1.z.unknown()).optional(),
-      template: zod_1.z.array(exports2.blockSchema).min(1).optional(),
-      /** Escape hatch: raw Slack Block Kit, Liquid applied to strings. */
-      slack_blocks: zod_1.z.array(zod_1.z.record(zod_1.z.string(), zod_1.z.unknown())).min(1).optional(),
+      template: zod_1.z.array(exports2.blockSchema).min(1),
       examples: zod_1.z.array(zod_1.z.strictObject({
         data: zod_1.z.record(zod_1.z.string(), zod_1.z.unknown()).default({}),
         recipients: zod_1.z.array(recipientRefSchema).default([])
       })).default([])
-    }).refine((r) => r.template !== void 0 || r.slack_blocks !== void 0, {
-      message: "either template or slack_blocks is required",
-      path: ["template"]
     });
   }
 });
@@ -37927,21 +37989,46 @@ var require_parse3 = __commonJS({
   "../config-schema/dist/parse.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.DIRECT_ROUTE = void 0;
     exports2.ownValue = ownValue2;
+    exports2.findRoute = findRoute;
     exports2.parseConfigTree = parseConfigTree;
     var yaml_1 = require_dist2();
     var data_schema_1 = require_data_schema();
+    var refs_1 = require_refs();
     var schemas_1 = require_schemas3();
     function ownValue2(record, key) {
       return Object.hasOwn(record, key) ? record[key] : void 0;
     }
-    var ROOT_FILES = ["config.yaml", "teams.yaml"];
+    exports2.DIRECT_ROUTE = {
+      id: "direct",
+      description: "Plain text to the recipients the sender names",
+      allowed_sources: { github_repos: [], api_keys: [] },
+      destinations: [],
+      recipients: [],
+      urgency: { default: "normal", max: "high" },
+      mandatory: false,
+      mentions: "none",
+      dm: true,
+      schema: {
+        type: "object",
+        required: ["text"],
+        properties: { text: { type: "string", minLength: 1 } }
+      },
+      template: [{ text: "{{ data.text }}" }],
+      examples: []
+    };
+    function findRoute(config, id) {
+      return id === exports2.DIRECT_ROUTE.id ? exports2.DIRECT_ROUTE : ownValue2(config.routes, id);
+    }
+    var ROOT_FILES = ["config.yaml", "teams.yaml", "places.yaml"];
     var ROUTE_FILE = /^routes\/([^/]+)\.ya?ml$/;
     function parseConfigTree(tree) {
       const errors = [];
       const warnings = [];
       const config = parseFile(tree, "config.yaml", schemas_1.configFileSchema, errors);
       const teamsFile = parseFile(tree, "teams.yaml", schemas_1.teamsFileSchema, errors);
+      const placesFile = parseFile(tree, "places.yaml", schemas_1.placesFileSchema, errors);
       for (const [file, message] of Object.entries(schemas_1.REMOVED_FILES)) {
         if (file in tree)
           errors.push({ file, path: [], message });
@@ -37964,6 +38051,10 @@ var require_parse3 = __commonJS({
           errors.push({ file, path: ["id"], message: `must match the file name "${match[1]}"` });
           continue;
         }
+        if (route.id === exports2.DIRECT_ROUTE.id) {
+          errors.push({ file, path: ["id"], message: `"${route.id}" is a built-in route` });
+          continue;
+        }
         const defined = ownValue2(routeFiles, route.id);
         if (defined) {
           errors.push({
@@ -37977,12 +38068,13 @@ var require_parse3 = __commonJS({
         routeFiles[route.id] = file;
       }
       const teams = teamsFile?.teams ?? {};
-      checkRoutes(routes, routeFiles, teams, errors);
+      const places = placesFile?.places ?? {};
+      checkRoutes(routes, routeFiles, teams, places, errors);
       if (errors.length > 0)
         return { ok: false, errors, warnings };
       return {
         ok: true,
-        config: { config: config ?? schemas_1.configFileSchema.parse({}), teams, routes },
+        config: { config: config ?? schemas_1.configFileSchema.parse({}), teams, places, routes },
         warnings,
         routeFiles
       };
@@ -38034,14 +38126,49 @@ var require_parse3 = __commonJS({
       const generic = path4.map((p, i) => i % 2 === 1 && path4[i - 1] === "teams" ? "*" : p);
       return `${file} ${[...generic, key].join(".")}`;
     }
-    function checkRoutes(routes, routeFiles, teams, errors) {
+    function checkRoutes(routes, routeFiles, teams, places, errors) {
       for (const [id, route] of Object.entries(routes)) {
         const file = routeFiles[id];
+        const checkPlace = (path4, name) => {
+          if (ownValue2(places, name))
+            return;
+          errors.push({ file, path: path4, message: `unknown place "${name}" (not defined in places.yaml)` });
+        };
         checkDataSchema(route, file, errors);
-        let needsTelegram = false;
+        if ((0, schemas_1.isMoreUrgent)(route.urgency.default, route.urgency.max)) {
+          errors.push({ file, path: ["urgency", "default"], message: "must not be above max" });
+        }
+        if (route.default_place) {
+          checkPlace(["default_place"], route.default_place);
+          if (route.destinations.length > 0) {
+            errors.push({
+              file,
+              path: ["default_place"],
+              message: "default_place is for routes without destinations"
+            });
+          }
+        } else if (route.destinations.length === 0) {
+          errors.push({
+            file,
+            path: ["destinations"],
+            message: "destinations or default_place is required"
+          });
+        }
+        route.recipients.forEach((recipient, i) => {
+          if (/\{[{%]/.test(recipient))
+            return;
+          const path4 = ["recipients", i];
+          if (!refs_1.recipientSchema.safeParse(recipient).success) {
+            errors.push({ file, path: path4, message: "must be a person, a team or place:<name>" });
+            return;
+          }
+          const place = (0, refs_1.placeOf)(recipient);
+          if (place !== void 0)
+            checkPlace(path4, place);
+        });
         route.destinations.forEach((destination, i) => {
-          if ("telegram" in destination)
-            needsTelegram = true;
+          if ("place" in destination)
+            checkPlace(["destinations", i, "place"], destination.place);
           if (!("team" in destination))
             return;
           const team = ownValue2(teams, destination.team);
@@ -38060,16 +38187,7 @@ var require_parse3 = __commonJS({
               message: `team "${destination.team}" has neither slack_channel nor telegram_chat`
             });
           }
-          if (team.telegram_chat)
-            needsTelegram = true;
         });
-        if (needsTelegram && !route.template) {
-          errors.push({
-            file,
-            path: ["template"],
-            message: "a Telegram destination requires template (slack_blocks render only to Slack)"
-          });
-        }
       }
     }
     function checkDataSchema(route, file, errors) {
@@ -43029,6 +43147,7 @@ var require_engine = __commonJS({
     exports2.renderAt = renderAt;
     exports2.httpUrl = httpUrl;
     exports2.createEngine = createEngine;
+    exports2.createPlainEngine = createPlainEngine;
     exports2.renderString = renderString;
     var liquidjs_1 = require_liquid_node();
     var SafeString = class {
@@ -43126,6 +43245,9 @@ var require_engine = __commonJS({
       });
       return engine;
     }
+    function createPlainEngine() {
+      return createEngine({ escape: (text) => text, mention: void 0, unmapped: /* @__PURE__ */ new Set() });
+    }
     function renderString(engine, source, ctx) {
       return engine.parseAndRenderSync(source, ctx);
     }
@@ -43137,8 +43259,8 @@ var require_markdown = __commonJS({
   "../templates/dist/markdown.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.safeLinkUrl = safeLinkUrl;
     exports2.renderMarkdown = renderMarkdown;
-    exports2.escapeLiterals = escapeLiterals;
     var engine_1 = require_engine();
     var LIQUID_TAG = /\{\{[\s\S]*?\}\}|\{%[\s\S]*?%\}/g;
     var PLACEHOLDER = /\uE000(\d+)\uE000/g;
@@ -43163,15 +43285,105 @@ var require_markdown = __commonJS({
     }
     function finishLinks(rendered, target) {
       return rendered.replace(PENDING_LINK, (_, url, text) => {
-        const safe = url.trim().replace(/"/g, "%22").replace(/\|/g, "%7C");
+        const safe = safeLinkUrl(url.trim());
         return engine_1.HTTP_URL.test(safe) ? target.link(text, safe) : text;
       });
+    }
+    var LINK_BREAKERS = { '"': "%22", "|": "%7C", "<": "%3C", ">": "%3E" };
+    function safeLinkUrl(url) {
+      return url.replace(/["|<>]/g, (char) => LINK_BREAKERS[char]);
     }
     function renderMarkdown(engine, source, target, ctx) {
       return finishLinks((0, engine_1.renderString)(engine, convertMarkdown(source, target), ctx), target);
     }
-    function escapeLiterals(source, escape2) {
-      return outsideLiquid(source, escape2);
+  }
+});
+
+// ../templates/dist/blocks.js
+var require_blocks = __commonJS({
+  "../templates/dist/blocks.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.BLOCK_TYPES = void 0;
+    exports2.renderBlocks = renderBlocks;
+    var engine_1 = require_engine();
+    var markdown_1 = require_markdown();
+    exports2.BLOCK_TYPES = [
+      "header",
+      "text",
+      "fields",
+      "context",
+      "divider",
+      "actions"
+    ];
+    function renderBlocks(route, input, { target, native, limits = {}, mention }) {
+      const unmapped = /* @__PURE__ */ new Set();
+      const ctx = { ...input, route: { id: route.id } };
+      const formatted = (0, engine_1.createEngine)({
+        escape: target.escape,
+        mention: route.mentions === "none" ? void 0 : mention,
+        unmapped
+      });
+      const unformatted = (0, engine_1.createPlainEngine)();
+      const render = {
+        markup: (path4, source) => (0, engine_1.renderAt)(path4, () => (0, markdown_1.renderMarkdown)(formatted, source, target, ctx)),
+        plain: (path4, source) => (0, engine_1.renderAt)(path4, () => (0, engine_1.renderString)(unformatted, source, ctx))
+      };
+      const isNative = (block) => native.includes(block.type);
+      const blocks = route.template.map((block, i) => {
+        const rendered = renderBlock(block, ["template", i], render, limits);
+        return isNative(rendered) ? rendered : { type: "text", text: blockAsText(rendered, target) };
+      });
+      return { message: blocks, unmapped: [...unmapped] };
+    }
+    function renderBlock(block, path4, render, limits) {
+      if ("header" in block) {
+        return { type: "header", text: render.plain([...path4, "header"], block.header) };
+      }
+      if ("text" in block) {
+        return { type: "text", text: render.markup([...path4, "text"], block.text) };
+      }
+      if ("fields" in block) {
+        return {
+          type: "fields",
+          fields: block.fields.slice(0, limits.fields).map((field, i) => ({
+            label: field.label,
+            value: render.markup([...path4, "fields", i, "value"], field.value)
+          }))
+        };
+      }
+      if ("context" in block) {
+        return { type: "context", text: render.markup([...path4, "context"], block.context) };
+      }
+      if ("actions" in block) {
+        return {
+          type: "actions",
+          actions: block.actions.slice(0, limits.actions).map((action, i) => {
+            const urlPath = [...path4, "actions", i, "url"];
+            return {
+              text: render.plain([...path4, "actions", i, "text"], action.text),
+              url: (0, engine_1.httpUrl)(urlPath, render.plain(urlPath, action.url))
+            };
+          })
+        };
+      }
+      return { type: "divider" };
+    }
+    function blockAsText(block, target) {
+      switch (block.type) {
+        case "header":
+          return target.bold(target.escape(block.text));
+        case "text":
+          return block.text;
+        case "fields":
+          return block.fields.map((field) => `${target.bold(target.escape(`${field.label}:`))} ${field.value}`).join("\n");
+        case "context":
+          return target.italic(block.text);
+        case "divider":
+          return "\u2014\u2014\u2014";
+        case "actions":
+          return block.actions.map((action) => target.link(target.escape(action.text), (0, markdown_1.safeLinkUrl)(action.url))).join(" \xB7 ");
+      }
     }
   }
 });
@@ -43183,8 +43395,8 @@ var require_slack = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.escapeSlack = escapeSlack;
     exports2.renderSlack = renderSlack2;
+    var blocks_1 = require_blocks();
     var engine_1 = require_engine();
-    var markdown_1 = require_markdown();
     function escapeSlack(text) {
       return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
@@ -43199,99 +43411,64 @@ var require_slack = __commonJS({
     var MAX_HEADER = 150;
     var MAX_TEXT = 3e3;
     var MAX_FIELDS = 10;
-    var MAX_BUTTONS = 25;
-    var MAX_BUTTON_TEXT = 75;
+    var MAX_FIELD_TEXT = 2e3;
+    var MAX_ACTIONS = 25;
+    var MAX_ACTION_TEXT = 75;
     var MAX_BLOCKS = 50;
     function renderSlack2(route, input, options = {}) {
-      const unmapped = /* @__PURE__ */ new Set();
-      const mention = route.mentions === "none" ? void 0 : options.mention;
-      const escaped = (0, engine_1.createEngine)({ escape: escapeSlack, mention, unmapped });
-      const plain = (0, engine_1.createEngine)({ escape: (s) => s, mention, unmapped });
-      const ctx = { ...input, route: { id: route.id } };
-      const mrkdwn2 = (path4, source) => (0, engine_1.renderAt)(path4, () => (0, markdown_1.renderMarkdown)(escaped, source, slackMarkdown, ctx));
-      const plainText = (path4, source) => (0, engine_1.renderAt)(path4, () => (0, engine_1.renderString)(plain, source, ctx));
-      let blocks;
-      if (route.slack_blocks) {
-        blocks = route.slack_blocks.map((block, i) => renderDeep(block, (s, p) => (0, engine_1.renderAt)(["slack_blocks", i, ...p], () => (0, engine_1.renderString)(escaped, s, ctx))));
-      } else {
-        blocks = (route.template ?? []).map((block, i) => toSlackBlock(block, ["template", i], mrkdwn2, plainText));
-      }
-      if (blocks.length > MAX_BLOCKS) {
+      const { message, unmapped } = (0, blocks_1.renderBlocks)(route, input, {
+        target: slackMarkdown,
+        native: blocks_1.BLOCK_TYPES,
+        limits: { fields: MAX_FIELDS, actions: MAX_ACTIONS },
+        mention: options.mention
+      });
+      if (message.length > MAX_BLOCKS) {
         throw new engine_1.TemplateRenderError(["template"], `Slack allows at most ${MAX_BLOCKS} blocks`);
       }
-      const fallback = fallbackText(blocks, route.slack_blocks ? (t) => t : escapeSlack);
-      return { message: { text: fallback, blocks }, unmapped: [...unmapped] };
+      const blocks = message.map(toSlackBlock);
+      return { message: { text: fallbackText(blocks), blocks }, unmapped };
     }
-    function toSlackBlock(block, path4, mrkdwn2, plainText) {
-      if ("header" in block) {
-        return {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: truncate(plainText([...path4, "header"], block.header), MAX_HEADER),
-            emoji: true
-          }
-        };
-      }
-      if ("text" in block) {
-        return {
-          type: "section",
-          text: { type: "mrkdwn", text: truncate(mrkdwn2([...path4, "text"], block.text), MAX_TEXT) }
-        };
-      }
-      if ("fields" in block) {
-        return {
-          type: "section",
-          fields: block.fields.slice(0, MAX_FIELDS).map((field, i) => ({
-            type: "mrkdwn",
-            text: truncate(`*${escapeSlack(field.label)}*
-${mrkdwn2([...path4, "fields", i, "value"], field.value)}`, 2e3)
-          }))
-        };
-      }
-      if ("buttons" in block) {
-        return {
-          type: "actions",
-          elements: block.buttons.slice(0, MAX_BUTTONS).map((button, i) => {
-            const urlPath = [...path4, "buttons", i, "url"];
-            const url = (0, engine_1.httpUrl)(urlPath, plainText(urlPath, button.url));
-            return {
+    function toSlackBlock(block) {
+      switch (block.type) {
+        case "header":
+          return {
+            type: "header",
+            text: { type: "plain_text", text: truncate(block.text, MAX_HEADER), emoji: true }
+          };
+        case "text":
+          return { type: "section", text: { type: "mrkdwn", text: truncate(block.text, MAX_TEXT) } };
+        case "fields":
+          return {
+            type: "section",
+            fields: block.fields.map((field) => ({
+              type: "mrkdwn",
+              text: truncate(`*${escapeSlack(field.label)}*
+${field.value}`, MAX_FIELD_TEXT)
+            }))
+          };
+        case "context":
+          return {
+            type: "context",
+            elements: [{ type: "mrkdwn", text: truncate(block.text, MAX_TEXT) }]
+          };
+        case "divider":
+          return { type: "divider" };
+        case "actions":
+          return {
+            type: "actions",
+            elements: block.actions.map((action) => ({
               type: "button",
-              text: {
-                type: "plain_text",
-                text: truncate(plainText([...path4, "buttons", i, "text"], button.text), MAX_BUTTON_TEXT),
-                emoji: true
-              },
-              url
-            };
-          })
-        };
+              text: { type: "plain_text", text: truncate(action.text, MAX_ACTION_TEXT), emoji: true },
+              url: action.url
+            }))
+          };
       }
-      if ("context" in block) {
-        return {
-          type: "context",
-          elements: [
-            { type: "mrkdwn", text: truncate(mrkdwn2([...path4, "context"], block.context), MAX_TEXT) }
-          ]
-        };
-      }
-      return { type: "divider" };
     }
-    function renderDeep(value, render, path4 = []) {
-      if (typeof value === "string")
-        return render(value, path4);
-      if (Array.isArray(value))
-        return value.map((v, i) => renderDeep(v, render, [...path4, i]));
-      if (value && typeof value === "object") {
-        return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, renderDeep(v, render, [...path4, k])]));
-      }
-      return value;
-    }
-    function fallbackText(blocks, escapePlain) {
+    function fallbackText(blocks) {
       for (const block of blocks) {
         const { type, text } = block.text ?? {};
         if (typeof text === "string" && text.trim()) {
-          return truncate(type === "plain_text" ? escapePlain(text) : text, MAX_TEXT);
+          return truncate(type === "plain_text" ? escapeSlack(text) : text, MAX_TEXT);
         }
       }
       return "Notification";
@@ -43309,8 +43486,7 @@ var require_telegram = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.escapeTelegram = escapeTelegram;
     exports2.renderTelegram = renderTelegram2;
-    var engine_1 = require_engine();
-    var markdown_1 = require_markdown();
+    var blocks_1 = require_blocks();
     function escapeTelegram(text) {
       return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
@@ -43325,45 +43501,27 @@ var require_telegram = __commonJS({
     var MAX_TEXT = 4096;
     var BUTTONS_PER_ROW = 3;
     var MAX_BUTTON_TEXT = 64;
+    var NATIVE_BLOCKS = ["text", "actions"];
     function renderTelegram2(route, input, options = {}) {
-      if (!route.template) {
-        throw new engine_1.TemplateRenderError(["template"], "Telegram needs a template (slack_blocks are Slack-only)");
-      }
-      const unmapped = /* @__PURE__ */ new Set();
-      const mention = route.mentions === "none" ? void 0 : options.mention;
-      const escaped = (0, engine_1.createEngine)({ escape: escapeTelegram, mention, unmapped });
-      const raw = (0, engine_1.createEngine)({ escape: (s) => s, mention, unmapped });
-      const ctx = { ...input, route: { id: route.id } };
-      const html = (path4, source) => (0, engine_1.renderAt)(path4, () => (0, markdown_1.renderMarkdown)(escaped, source, telegramMarkdown, ctx));
-      const plain = (path4, source) => (0, engine_1.renderAt)(path4, () => (0, engine_1.renderString)(escaped, (0, markdown_1.escapeLiterals)(source, escapeTelegram), ctx));
-      const url = (path4, source) => (0, engine_1.httpUrl)(path4, (0, engine_1.renderAt)(path4, () => (0, engine_1.renderString)(raw, source, ctx)));
+      const { message, unmapped } = (0, blocks_1.renderBlocks)(route, input, {
+        target: telegramMarkdown,
+        native: NATIVE_BLOCKS,
+        mention: options.mention
+      });
       const parts = [];
       const buttons = [];
-      route.template.forEach((block, i) => {
-        const path4 = ["template", i];
-        if ("header" in block)
-          parts.push(`<b>${plain([...path4, "header"], block.header)}</b>`);
-        else if ("text" in block)
-          parts.push(html([...path4, "text"], block.text));
-        else if ("fields" in block) {
-          parts.push(block.fields.map((f, j) => `<b>${escapeTelegram(f.label)}:</b> ${html([...path4, "fields", j, "value"], f.value)}`).join("\n"));
-        } else if ("buttons" in block) {
-          block.buttons.forEach((b, j) => {
-            const text = (0, engine_1.renderAt)([...path4, "buttons", j, "text"], () => (0, engine_1.renderString)(raw, b.text, ctx));
-            buttons.push({
-              text: text.slice(0, MAX_BUTTON_TEXT),
-              url: url([...path4, "buttons", j, "url"], b.url)
-            });
-          });
-        } else if ("context" in block)
-          parts.push(`<i>${html([...path4, "context"], block.context)}</i>`);
-        else
-          parts.push("\u2014\u2014\u2014");
-      });
-      return {
-        message: { text: fitText(parts), buttons: chunk(buttons, BUTTONS_PER_ROW) },
-        unmapped: [...unmapped]
-      };
+      for (const block of message) {
+        switch (block.type) {
+          case "text":
+            parts.push(block.text);
+            break;
+          case "actions":
+            for (const { text, url } of block.actions) {
+              buttons.push({ text: text.slice(0, MAX_BUTTON_TEXT), url });
+            }
+        }
+      }
+      return { message: { text: fitText(parts), buttons: chunk(buttons, BUTTONS_PER_ROW) }, unmapped };
     }
     function fitText(parts) {
       const joined = parts.join("\n\n");
@@ -43393,6 +43551,42 @@ ${part}` : part;
   }
 });
 
+// ../templates/dist/recipients.js
+var require_recipients = __commonJS({
+  "../templates/dist/recipients.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.renderGroupKey = renderGroupKey;
+    exports2.renderRouteRecipients = renderRouteRecipients;
+    var config_schema_1 = require_dist3();
+    var engine_1 = require_engine();
+    function renderGroupKey(route, data) {
+      const { group } = route;
+      if (!group)
+        return void 0;
+      const key = (0, engine_1.renderAt)(["group", "key"], () => (0, engine_1.renderString)((0, engine_1.createPlainEngine)(), group.key, dataContext(route, data))).trim();
+      return key || void 0;
+    }
+    function renderRouteRecipients(route, data) {
+      const engine = (0, engine_1.createPlainEngine)();
+      const ctx = dataContext(route, data);
+      const found = /* @__PURE__ */ new Set();
+      route.recipients.forEach((source, i) => {
+        const rendered = (0, engine_1.renderAt)(["recipients", i], () => (0, engine_1.renderString)(engine, source, ctx));
+        for (const candidate of rendered.split(/[\s,]+/)) {
+          const recipient = config_schema_1.recipientSchema.safeParse(candidate);
+          if (recipient.success)
+            found.add(recipient.data);
+        }
+      });
+      return [...found];
+    }
+    function dataContext(route, data) {
+      return { data, recipients: [], route: { id: route.id } };
+    }
+  }
+});
+
 // ../templates/dist/validate.js
 var require_validate2 = __commonJS({
   "../templates/dist/validate.js"(exports2) {
@@ -43402,6 +43596,7 @@ var require_validate2 = __commonJS({
     exports2.validateConfigTree = validateConfigTree2;
     var config_schema_1 = require_dist3();
     var engine_1 = require_engine();
+    var recipients_1 = require_recipients();
     var slack_1 = require_slack();
     var telegram_1 = require_telegram();
     function validateRouteTemplates(route) {
@@ -43409,9 +43604,10 @@ var require_validate2 = __commonJS({
       const issues = [];
       inputs.forEach((input, i) => {
         try {
+          (0, recipients_1.renderRouteRecipients)(route, input.data);
+          (0, recipients_1.renderGroupKey)(route, input.data);
           (0, slack_1.renderSlack)(route, input);
-          if (route.template)
-            (0, telegram_1.renderTelegram)(route, input);
+          (0, telegram_1.renderTelegram)(route, input);
         } catch (err) {
           if (!(err instanceof engine_1.TemplateRenderError))
             throw err;
@@ -43441,7 +43637,7 @@ var require_dist4 = __commonJS({
   "../templates/dist/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.validateRouteTemplates = exports2.validateConfigTree = exports2.renderTelegram = exports2.escapeTelegram = exports2.renderSlack = exports2.escapeSlack = exports2.TemplateRenderError = exports2.SafeString = void 0;
+    exports2.validateRouteTemplates = exports2.validateConfigTree = exports2.renderRouteRecipients = exports2.renderGroupKey = exports2.renderTelegram = exports2.escapeTelegram = exports2.renderSlack = exports2.escapeSlack = exports2.TemplateRenderError = exports2.SafeString = void 0;
     var engine_1 = require_engine();
     Object.defineProperty(exports2, "SafeString", { enumerable: true, get: function() {
       return engine_1.SafeString;
@@ -43462,6 +43658,13 @@ var require_dist4 = __commonJS({
     } });
     Object.defineProperty(exports2, "renderTelegram", { enumerable: true, get: function() {
       return telegram_1.renderTelegram;
+    } });
+    var recipients_1 = require_recipients();
+    Object.defineProperty(exports2, "renderGroupKey", { enumerable: true, get: function() {
+      return recipients_1.renderGroupKey;
+    } });
+    Object.defineProperty(exports2, "renderRouteRecipients", { enumerable: true, get: function() {
+      return recipients_1.renderRouteRecipients;
     } });
     var validate_1 = require_validate2();
     Object.defineProperty(exports2, "validateConfigTree", { enumerable: true, get: function() {
@@ -43498,8 +43701,11 @@ function previewMarkdown(config, routeIds, files = {}) {
 function routeSection(route, config, file) {
   const lines = [`### \`${route.id}\`${route.description ? ` \u2014 ${route.description}` : ""}`, ""];
   const targets = route.destinations.map(
-    (d) => "slack" in d ? `Slack ${d.slack}` : "telegram" in d ? `Telegram ${d.telegram}` : `team ${d.team}${teamChannels(config, d.team)}`
+    (d) => "team" in d ? `team ${d.team}${teamChannels(config, d.team)}` : "place" in d ? namedPlace(config, d.place) : room(d)
   );
+  if (route.default_place) {
+    targets.push(`${namedPlace(config, route.default_place)} when it reaches nobody else`);
+  }
   lines.push(`**To:** ${targets.join(", ")}${route.dm ? " \xB7 personal copies to recipients" : ""}`);
   const sources = [
     ...route.allowed_sources.github_repos.map((r) => `\`${r}\``),
@@ -43507,7 +43713,7 @@ function routeSection(route, config, file) {
   ];
   lines.push(`**From:** ${sources.join(", ")}`, "");
   const examples = route.examples.length > 0 ? route.examples : [{ data: {}, recipients: [] }];
-  const toTelegram = route.template && reachesTelegram(route, config);
+  const toTelegram = reachesTelegram(route, config);
   examples.forEach((example, i) => {
     if (route.examples.length > 1) lines.push(`#### Example ${i + 1}`, "");
     try {
@@ -43548,9 +43754,17 @@ function teamChannels(config, slug) {
   const channels = [team?.slack_channel, team?.telegram_chat].filter(Boolean);
   return channels.length ? ` (${channels.join(", ")})` : "";
 }
+function room(place) {
+  return "slack" in place ? `Slack ${place.slack}` : `Telegram ${place.telegram}`;
+}
+function namedPlace(config, name) {
+  const place = (0, import_config_schema.ownValue)(config.places, name);
+  return `place ${name}${place ? ` (${room(place)})` : ""}`;
+}
 function reachesTelegram(route, config) {
-  return route.destinations.some(
-    (d) => "telegram" in d || "team" in d && Boolean((0, import_config_schema.ownValue)(config.teams, d.team)?.telegram_chat)
+  const isTelegram = (name) => "telegram" in ((0, import_config_schema.ownValue)(config.places, name) ?? {});
+  return route.default_place !== void 0 && isTelegram(route.default_place) || route.destinations.some(
+    (d) => "telegram" in d || "place" in d && isTelegram(d.place) || "team" in d && Boolean((0, import_config_schema.ownValue)(config.teams, d.team)?.telegram_chat)
   );
 }
 function blockKitBuilderUrl(blocks) {
@@ -43582,14 +43796,11 @@ function slackBlocksToMarkdown(blocks) {
         break;
       case "actions":
         out.push(
-          (block.elements ?? []).map((b) => `[\`${b.text.text}\`](${b.url ?? "#"})`).join(" ")
+          (block.elements ?? []).map((b) => `[\`${b.text.text}\`](${b.url})`).join(" ")
         );
         break;
       case "divider":
         out.push("\u2014\u2014\u2014");
-        break;
-      default:
-        out.push(`_(${block.type} block)_`);
     }
   }
   return out.join("\n\n");

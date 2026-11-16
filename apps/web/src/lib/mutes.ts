@@ -48,7 +48,7 @@ export function useMuteToggle() {
     onSuccess: (preferences, { routeId, muted }) => {
       client.setQueryData<Me>(["me"], (me) => (me?.person ? { ...me, preferences } : me));
       toast.success(
-        muted ? `Muted personal copies of ${routeId}` : `Personal copies of ${routeId} are back on`,
+        muted ? `Muted ${routeId}` : `${routeId} is back on`,
         // Runs after the row may be gone; the options callbacks above still apply.
         { action: { label: "Undo", onClick: () => mutation.mutate({ routeId, muted: !muted }) } },
       );

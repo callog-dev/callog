@@ -1,5 +1,12 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -9,6 +16,8 @@ import { validate } from "./validate";
 const FIXTURE = path.resolve(__dirname, "../../config-schema/fixtures/valid");
 /** The starter repo new installs create from the setup checklist. */
 const TEMPLATE = path.resolve(__dirname, "../../../templates/notify-config");
+/** Ready-made routes for systems that send their own webhooks. */
+const PRESETS = path.resolve(__dirname, "../../../templates/presets");
 
 function repo(files: Record<string, string>): string {
   const dir = mkdtempSync(path.join(tmpdir(), "notify-config-"));
@@ -23,7 +32,7 @@ const BROKEN_ROUTE = `
 id: broken
 allowed_sources: { api_keys: [ci] }
 destinations: [{ team: ghosts }]
-template: [{ buttons: [{ text: Go, url: "{{ data.u }}" }] }]
+template: [{ actions: [{ text: Go, url: "{{ data.u }}" }] }]
 examples: [{ data: { u: "not a url" } }]
 `;
 
@@ -40,6 +49,20 @@ describe("notify validate", () => {
     expect(report.summary).toBe("✔ Config is valid: 1 route, 0 teams");
   });
 
+  it.each(readdirSync(PRESETS).filter((file) => file.endsWith(".yaml")))(
+    "accepts the preset %s once its place exists",
+    (file) => {
+      const report = validate({
+        dir: repo({
+          "places.yaml": 'places: { alerts: { slack: "#alerts" } }',
+          [`routes/${file}`]: readFileSync(path.join(PRESETS, file), "utf8"),
+        }),
+      });
+      expect(report.lines).toEqual(["✔ Config is valid: 1 route, 0 teams"]);
+      expect(report.ok).toBe(true);
+    },
+  );
+
   it("reports config and template errors with file and path", () => {
     const report = validate({ dir: repo({ "routes/broken.yaml": BROKEN_ROUTE }) });
     expect(report.ok).toBe(false);
@@ -55,7 +78,7 @@ describe("notify validate", () => {
     expect(report.errors).toEqual([
       {
         file: "routes/broken.yaml",
-        path: ["template", 0, "buttons", 0, "url"],
+        path: ["template", 0, "actions", 0, "url"],
         message: 'example 0: rendered URL must be http(s), got "not a url"',
       },
     ]);

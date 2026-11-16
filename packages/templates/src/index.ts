@@ -19,4 +19,5 @@ export {
   type TelegramMessage,
   type TelegramRenderOptions,
 } from "./telegram";
+export { renderGroupKey, renderRouteRecipients } from "./recipients";
 export { validateConfigTree, validateRouteTemplates, type TemplateIssue } from "./validate";

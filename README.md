@@ -17,7 +17,7 @@ database, TLS, poolers, scripted setup and registering the App by hand, see
 ### 1. Get the files
 
 ```bash
-git clone --branch v0.4.0 --depth 1 https://github.com/callog-dev/callog && cd callog
+git clone --branch v0.5.0 --depth 1 https://github.com/callog-dev/callog && cd callog
 cp .env.example .env
 ```
 
@@ -28,7 +28,7 @@ Set three lines in `.env` and leave the rest empty:
 ```bash
 PUBLIC_URL=https://callog.acme.dev            # the address people will open; http://localhost:3000 to try it
 ENCRYPTION_KEY=...                            # openssl rand -base64 32 — keep it with your database backups
-CALLOG_IMAGE=ghcr.io/callog-dev/callog:0.4.0  # empty = build from source
+CALLOG_IMAGE=ghcr.io/callog-dev/callog:0.5.0  # empty = build from source
 ```
 
 ### 3. Start
@@ -66,22 +66,53 @@ started** checklist on the Overview page covers the rest:
 - **Telegram** (optional) — paste a [@BotFather](https://t.me/BotFather) token; groups you add
   the bot to show up with their ids.
 - **Config repo** — create `<org>/notify-config` from the
-  [template](https://github.com/callog-dev/notify-config-template). It holds routing only: no
-  logins or emails. Every push to its default branch is validated and loaded; an invalid config
-  is rejected and the previous one stays active.
+  [template](https://github.com/callog-dev/notify-config-template). It holds routing only:
+  routes, teams, and places — rooms by name, so that routes and senders say `deploys` and one
+  file says which Slack channel that is. No logins or emails. Every push to its default branch
+  is validated and loaded; an invalid config is rejected and the previous one stays active.
 - **A first notification** — send a route's example to yourself and copy the
   [GitHub Action](packages/action/README.md) step that sends it from a workflow. Its `url:` must
   be reachable from the runner: on a laptop, use the address
   `cloudflared tunnel --url http://localhost:3000` prints (smee relays only webhooks).
+- **Alerts** (optional) — a hook gives Grafana, or any system that sends its own webhooks, a
+  URL to post to; see [Senders](#senders) below.
 
-Services send with an API key (Settings → API keys) named in the route's
-`allowed_sources.api_keys`:
+### Senders
 
-```bash
-curl -X POST $PUBLIC_URL/v1/notify \
-  -H "Authorization: Bearer $NOTIFY_API_KEY" -H "Content-Type: application/json" \
-  -d '{"route":"hello","data":{"text":"Deployed"},"recipients":["github:octocat"]}'
-```
+A sender names a route, the data, and whom it is for — people (`github:octocat`,
+`email:…`), teams (`team:frontend`) and places (`place:deploys`). It never names a messenger
+or a channel: that is the config's business.
+
+- **GitHub Actions** use the [Action](packages/action/README.md); the workflow's OIDC token is
+  the credential, and the route lists the repository in `allowed_sources.github_repos`.
+- **Services** send with an API key (Settings → API keys) named in the route's
+  `allowed_sources.api_keys`:
+
+  ```bash
+  curl -X POST $PUBLIC_URL/v1/notify \
+    -H "Authorization: Bearer $NOTIFY_API_KEY" -H "Content-Type: application/json" \
+    -d '{"route":"hello","data":{"text":"Deployed"},"recipients":["github:octocat"]}'
+  ```
+
+- **A script that just has something to say** needs no route of its own: a key created with
+  _Direct messages_ sends plain text through the built-in `direct` route.
+
+  ```bash
+  curl -X POST $PUBLIC_URL/v1/notify \
+    -H "Authorization: Bearer $NOTIFY_API_KEY" -H "Content-Type: application/json" \
+    -d '{"route":"direct","data":{"text":"Backup failed"},"recipients":["github:octocat","place:ops"]}'
+  ```
+
+- **Systems that send their own webhooks** — alerting tools — post whatever JSON they send to
+  a hook (Settings → Hooks), which is bound to one route. The route takes the recipients from
+  that JSON and can group repeats of the same alert into one message. Ready-made routes are
+  in [templates/presets](templates/presets); the first is for Grafana Alerting. Connecting
+  one is described in [docs/setup.md](docs/setup.md#11-places-hooks-and-alert-sources).
+
+A route with personal copies (`dm: true`) does not give up on a person at the first refusal:
+a copy a messenger will not take goes to the person's other messenger, then to the room of the
+team they were named through, then to the route's default place. A notification's page shows
+what happened to each recipient.
 
 ### Day to day
 
@@ -91,21 +122,24 @@ Everyone sees **Routes** (where each route posts, who may send to it) and **My n
 - **Overview** — what needs attention (a rejected config push, failed notifications, people
   nobody is linked to), each item linking to where it is fixed.
 - **Deliveries** — every notification with its deliveries and errors, filtered by status,
-  route, sender and period. A failed one can be sent again.
+  route, sender and period. A notification's page traces it: whom each delivery was for, what
+  took over a refused one, who was left out and why. A failed one can be sent again.
 - **People** and **Teams** — search people by name or account, link accounts by hand, confirm
   suggested links, see who a team's `members_from` resolves to.
+- **Places** — the room behind each name, and the routes that use it.
 - **Config** — every push of the config repo, with the errors of a rejected one.
 - **Integrations** — connect, replace or disconnect Slack and Telegram, sync people, send a test
   message.
-- **Settings** — admins, API keys, and maintenance (sync people or apply retention now).
+- **Settings** — admins, API keys, hooks, and maintenance (sync people or apply retention
+  now).
 
 Every page and filter has its own URL, so a link from a chat opens the same view. Press ⌘K
 (Ctrl+K) to jump to a page, a route, a person or a notification.
 
 ### Kubernetes
 
-A Helm chart and the cluster setup, including a separate public host for webhooks, are in
-[charts/callog/README.md](charts/callog/README.md).
+A Helm chart and the cluster setup, including separate public hosts for GitHub's webhooks and
+for senders outside the cluster, are in [charts/callog/README.md](charts/callog/README.md).
 
 ### Operating
 

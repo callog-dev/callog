@@ -132,14 +132,38 @@ describe("personal copies and preferences (integration)", () => {
     expect(telegram.sent.map((s) => s.chatId).sort()).toEqual(["42", "43"]);
   });
 
-  it("mute skips the personal copy but keeps the channel mention", async () => {
-    expect(await notify("prefs mute r", "UB")).toContain("Muted personal copies of `r`");
+  it("mute skips the personal copy and names the person without a mention", async () => {
+    expect(await notify("prefs mute r", "UB")).toContain("Muted `r`");
 
-    expect(await deliver("r", ["github:bob"])).toEqual(["slack #alerts sent"]);
-    expect(slack.posted[0]!.message.text).toContain("<@UB>");
+    expect(await deliver("r", ["github:bob", "github:alice"])).toEqual([
+      "slack #alerts sent",
+      "slack dm:UA sent",
+    ]);
+    expect(slack.posted[0]!.message.text).toBe("e2e failed bob, <@UA>");
+
+    // Without personal copies the mute still leaves a trace: an admin can see why.
+    await notify("prefs mute quiet", "UB");
+    await deliver("quiet", ["github:bob"]);
+    const quiet = (await db.select().from(notifications)).find((n) => n.routeId === "quiet")!;
+    expect(quiet.trace.map((note) => note.note)).toEqual(["muted"]);
 
     await notify("prefs unmute r", "UB");
     expect(await deliver("r", ["github:bob"])).toContain("slack dm:UB sent");
+  });
+
+  it("does not let a mandatory route be muted", async () => {
+    await notify("prefs mute r", "UB");
+    versionId = (
+      await activateConfig(app, tenantId, {
+        "teams.yaml": "teams:\n  fe: { slack_channel: '#fe', members_from: { github_team: fe } }",
+        "routes/r.yaml": `${route("r", true)}\nmandatory: true`,
+      })
+    ).id;
+
+    // A mute from before the route became mandatory no longer holds.
+    expect(await deliver("r", ["github:bob"])).toEqual(["slack #alerts sent", "slack dm:UB sent"]);
+    expect(slack.posted.find((p) => p.channel === "C0ALERTS1")!.message.text).toContain("<@UB>");
+    expect(await notify("prefs mute r", "UA")).toContain("cannot be muted");
   });
 
   it("keeps personal copies of one thread in one DM thread", async () => {

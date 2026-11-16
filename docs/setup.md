@@ -236,3 +236,67 @@ DBA as in [§5](#5-migrations).
 To keep the UI internal, give webhooks their own public host. `GITHUB_WEBHOOK_URL` sets that
 address for an App the setup page creates; the chart's `webhookIngress` sets it for you. For an
 existing App, change its Webhook URL in the App's settings on GitHub.
+
+## 11. Places, hooks and alert sources
+
+**Places.** `places.yaml` in the config repo gives rooms a name:
+
+```yaml
+places:
+  deploys: { slack: "#deploys" }
+  alerts: { slack: "#alerts" }
+```
+
+A route delivers to `place: deploys`, a sender adds `place:deploys` to `recipients`, and a
+route without destinations names a `default_place` — where a notification is posted when it
+reaches nobody else. Moving a place to another channel, or another messenger, is a change to
+this one file. The bot posts to public Slack channels without being invited; invite it to any
+private channel a place or a team uses, and add the Telegram bot to the groups behind
+Telegram places.
+
+**Hooks.** A system that sends its own webhooks cannot build Callog's request, and often cannot
+hold an API key. In Settings → Hooks an admin creates a hook for one route and gets its URL,
+shown once. Whatever JSON object is posted there becomes the notification's `data`; the route
+says what to do with it:
+
+```yaml
+recipients: ["{{ data.commonLabels.callog_notify }}"] # people, teams and places, from the data
+group: { key: "{{ data.alertname }}", window: 15m } # repeats with the same key edit one message
+```
+
+The key decides what counts as a repeat. Everything with the same key within the window
+edits the first message, and an edit notifies nobody — so for alerts the key has to tell one
+incident from the next. The Grafana preset below does.
+
+A hook takes its token in either of two ways:
+
+| The sender              | Posts to            | Token                           |
+| ----------------------- | ------------------- | ------------------------------- |
+| can set a header        | `/v1/hooks`         | `Authorization: Bearer <token>` |
+| can only be given a URL | `/v1/hooks/<token>` | part of the URL                 |
+
+Prefer the header: a URL is kept in the sender's settings as plain text, and proxies write
+URLs to their logs. Callog itself never logs a request's path.
+
+**Grafana Alerting.**
+
+1. Copy [templates/presets/grafana-alerts.yaml](../templates/presets/grafana-alerts.yaml) to
+   `routes/grafana-alerts.yaml` in the config repo and set its `default_place` to a place of
+   yours. `notify validate` renders it on the example payload it comes with.
+2. In Callog, Settings → Hooks: create a hook for the route `grafana-alerts`. Copy the token —
+   the `hk_…` part at the end of the URL.
+3. In Grafana, Alerting → Contact points: add a contact point of type **Webhook** with the URL
+   `<Callog>/v1/hooks`, where `<Callog>` is an address Grafana can reach — not necessarily the
+   one you open in the browser. In its optional settings, set the authorization header: scheme
+   `Bearer`, credentials — the token.
+4. Press **Test** on the contact point: the alert shows up in the default place, and on
+   Callog's Deliveries page with everything that happened to it.
+
+To notify people as well, give an alert rule the label `callog_notify`, for example
+`team:sre` or `github:octocat place:oncall`. A group of alerts that keeps firing edits one
+message, and the same message turns to "resolved"; when the group fires again, that is a new
+message.
+
+**Reaching Callog.** Senders call the API under `/v1/`. On Kubernetes, senders in the cluster
+use the api Service, and senders outside it need the chart's `sendersIngress`; both are in the
+[chart's README](../charts/callog/README.md#senders).

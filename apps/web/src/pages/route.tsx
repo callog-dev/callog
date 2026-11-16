@@ -89,6 +89,21 @@ export function RoutePage({ linked, admin }: { linked: boolean; admin: boolean }
                 </dd>
               </>
             )}
+            {r.addsRecipients && (
+              <>
+                <dt className="text-muted-foreground">Recipients</dt>
+                <dd>Also taken from the data of each notification</dd>
+              </>
+            )}
+            {r.groupWindow !== null && (
+              <>
+                <dt className="text-muted-foreground">Repeats</dt>
+                <dd>
+                  Edit one message for {formatWindow(r.groupWindow)} after the first, instead of
+                  posting again
+                </dd>
+              </>
+            )}
             <dt className="text-muted-foreground">Mentions</dt>
             <dd>{r.mentions === "recipients" ? "The recipients of each notification" : "None"}</dd>
             <dt className="text-muted-foreground">Personal copies</dt>
@@ -115,7 +130,7 @@ export function RoutePage({ linked, admin }: { linked: boolean; admin: boolean }
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
-            <Code title="Template" value={r.template ?? r.slackBlocks} />
+            <Code title="Template" value={r.template} />
             {r.examples?.length ? <Code title="Examples" value={r.examples} /> : null}
           </CardContent>
         </Card>
@@ -134,4 +149,10 @@ function Code({ title, value }: { title: string; value: unknown }) {
       </pre>
     </section>
   );
+}
+
+/** `90 s`, `15 min`, `12 h`: a duration at the unit it was most likely written in. */
+function formatWindow(seconds: number): string {
+  if (seconds % 3600 === 0) return `${seconds / 3600} h`;
+  return seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`;
 }

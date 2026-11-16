@@ -1,3 +1,4 @@
+import { URGENCIES, type Ref } from "@callog/config-schema";
 import { sql } from "drizzle-orm";
 import {
   bigint,
@@ -122,6 +123,8 @@ export const apiKeys = pgTable(
     /** First characters of the key, shown in the UI to tell keys apart. */
     prefix: text("prefix").notNull(),
     keyHash: text("key_hash").notNull().unique(),
+    /** May send to the built-in `direct` route: plain text to any person or place. */
+    allowDirect: boolean("allow_direct").notNull().default(false),
     createdAt: createdAt(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -129,11 +132,44 @@ export const apiKeys = pgTable(
   (t) => [unique("api_keys_tenant_name_uq").on(t.tenantId, t.name)],
 );
 
+/** Inbound webhooks: a secret URL that posts any JSON it receives to one route. */
+export const hooks = pgTable(
+  "hooks",
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text("name").notNull(),
+    routeId: text("route_id").notNull(),
+    /** First characters of the token, shown in the UI to tell hooks apart. */
+    prefix: text("prefix").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: createdAt(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [unique("hooks_tenant_name_uq").on(t.tenantId, t.name)],
+);
+
 export type NotificationSource =
   | { type: "github_oidc"; repository: string }
   | { type: "api_key"; apiKeyId: string; apiKeyName: string }
+  | { type: "hook"; hookId: string; hookName: string; routeId: string }
   /** "Send test" in the admin UI; `actor` is who pressed it (`@login` or a person's name). */
   | { type: "admin_test"; actor: string };
+
+/** Why a recipient of a notification got no message of their own, or no mention. */
+export interface TraceNote {
+  /** `person:<id>` for someone Callog knows, otherwise the ref as the sender wrote it. */
+  recipient: Ref;
+  note:
+    | "muted" // the person muted the route
+    | "no_account" // a known person with no account in any messenger
+    | "unknown" // nobody Callog knows
+    | "empty_team" // a team with nobody to write to
+    | "not_mentioned"; // no account in `channel`, so named as text there
+  channel?: string;
+  detail?: string;
+}
 
 export const notifications = pgTable(
   "notifications",
@@ -152,6 +188,12 @@ export const notifications = pgTable(
       .default(sql`'{}'::text[]`),
     threadKey: text("thread_key"),
     update: boolean("update").notNull().default(false),
+    /** What the route's `group.key` rendered to; repeats within the window share a thread. */
+    groupKey: text("group_key"),
+    /** How much the notification may interrupt. Recorded; nothing acts on it yet. */
+    urgency: text("urgency", { enum: URGENCIES }).notNull().default("normal"),
+    /** Written once, when the deliveries are planned. */
+    trace: jsonb("trace").$type<TraceNote[]>().notNull().default([]),
     status: text("status", {
       enum: ["accepted", "processing", "delivered", "partially_failed", "failed"],
     })
@@ -163,12 +205,19 @@ export const notifications = pgTable(
   (t) => [
     index("notifications_tenant_created_idx").on(t.tenantId, t.createdAt),
     index("notifications_tenant_thread_idx").on(t.tenantId, t.threadKey),
+    index("notifications_group_idx").on(t.tenantId, t.routeId, t.groupKey, t.createdAt),
   ],
 );
 
 export type ProviderMessageRef =
   | { provider: "slack"; channel: string; ts: string }
   | { provider: "telegram"; chatId: string; messageId: number };
+
+/** Where one delivery goes; `destination` is a room, or `dm:<account id>` for a person. */
+export interface DeliveryTarget {
+  provider: Extract<Provider, "slack" | "telegram">;
+  destination: string;
+}
 
 export const deliveries = pgTable(
   "deliveries",
@@ -186,6 +235,16 @@ export const deliveries = pgTable(
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
     providerMessageRef: jsonb("provider_message_ref").$type<ProviderMessageRef>(),
+    /** Whom a personal copy, or what replaced it, is for: `person:<id>` or an unknown ref. */
+    forPeople: text("for_people")
+      .array()
+      .$type<Ref[]>()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** Where to send instead when this delivery fails for good, in order. */
+    fallbacks: jsonb("fallbacks").$type<DeliveryTarget[]>().notNull().default([]),
+    /** The delivery that took over when this one failed for good. */
+    fallbackTo: uuid("fallback_to"),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -314,7 +373,7 @@ export const personPreferences = pgTable("person_preferences", {
   dmChannel: text("dm_channel", { enum: ["slack", "telegram"] })
     .notNull()
     .default("slack"),
-  /** Routes whose personal copies the person does not want. Channel mentions are unaffected. */
+  /** Routes the person does not want to hear from: no personal copy and no mention. */
   mutedRoutes: text("muted_routes")
     .array()
     .notNull()

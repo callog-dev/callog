@@ -62,9 +62,17 @@ function convertMasked(masked: string, target: MarkdownTarget): string {
  */
 function finishLinks(rendered: string, target: MarkdownTarget): string {
   return rendered.replace(PENDING_LINK, (_, url: string, text: string) => {
-    const safe = url.trim().replace(/"/g, "%22").replace(/\|/g, "%7C");
+    const safe = safeLinkUrl(url.trim());
     return HTTP_URL.test(safe) ? target.link(text, safe) : text;
   });
+}
+
+/** Characters that would end a link in Slack (`<url|text>`) or HTML (`href="url"`) markup. */
+const LINK_BREAKERS: Record<string, string> = { '"': "%22", "|": "%7C", "<": "%3C", ">": "%3E" };
+
+/** A URL taken from data, unable to break out of the link it is put into. */
+export function safeLinkUrl(url: string): string {
+  return url.replace(/["|<>]/g, (char) => LINK_BREAKERS[char]!);
 }
 
 /** Renders a template text block: markdown for the target, escaped data, finished links. */
@@ -75,9 +83,4 @@ export function renderMarkdown(
   ctx: RenderContext,
 ): string {
   return finishLinks(renderString(engine, convertMarkdown(source, target), ctx), target);
-}
-
-/** Escapes the literal text of a template while leaving Liquid tags untouched. */
-export function escapeLiterals(source: string, escape: (text: string) => string): string {
-  return outsideLiquid(source, escape);
 }

@@ -6,17 +6,15 @@ import {
   HttpCode,
   Param,
   ParseUUIDPipe,
-  PayloadTooLargeException,
   Post,
   Req,
   Res,
-  UnprocessableEntityException,
   type RawBodyRequest,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ProducerAuthService } from "../producers/producer-auth.service";
 import { NotificationsService } from "./notifications.service";
-import { MAX_BODY_BYTES, notifyRequestSchema } from "./notify-request";
+import { assertBodySize, parseNotifyRequest } from "./notify-request";
 
 /** Producer API. */
 @Controller("v1")
@@ -36,25 +34,16 @@ export class NotifyController {
   ) {
     const producer = await this.auth.authenticate(authorization);
 
-    const size = req.rawBody?.length ?? Buffer.byteLength(JSON.stringify(req.body ?? {}));
-    if (size > MAX_BODY_BYTES) {
-      throw new PayloadTooLargeException(`Request body exceeds ${MAX_BODY_BYTES} bytes`);
-    }
+    assertBodySize(req);
     if (
       idempotencyKey !== undefined &&
       (idempotencyKey.length === 0 || idempotencyKey.length > 200)
     ) {
       throw new BadRequestException("Idempotency-Key must be 1-200 characters");
     }
-    const parsed = notifyRequestSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      throw new UnprocessableEntityException({
-        message: "Invalid request body",
-        issues: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
-      });
-    }
+    const request = parseNotifyRequest(req.body ?? {});
 
-    const accepted = await this.notifications.accept(producer, parsed.data, idempotencyKey);
+    const accepted = await this.notifications.accept(producer, request, idempotencyKey);
     if (accepted.replayed) reply.header("idempotent-replayed", "true");
     return { notification_id: accepted.notificationId, status: "accepted" };
   }

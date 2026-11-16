@@ -84,6 +84,15 @@ webhookIngress:
   host: ""
   tls: []
 
+# A separate host that only serves the sender API under /v1/ (notify, hooks), for CI runners
+# and alerting systems outside the cluster, so the UI can stay internal.
+sendersIngress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+
 metrics:
   # A Prometheus Operator PodMonitor for the api and worker pods.
   podMonitor:

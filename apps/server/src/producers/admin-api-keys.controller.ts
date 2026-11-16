@@ -10,12 +10,9 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
-import { z } from "zod";
 import { AdminTokenGuard } from "../admin/admin-token.guard";
 import { parseBody } from "../admin/parse-body";
-import { apiKeyNameSchema, ApiKeysService } from "./api-keys.service";
-
-const createBody = z.object({ name: apiKeyNameSchema });
+import { apiKeyBody, ApiKeysService } from "./api-keys.service";
 
 @Controller("admin/tenants/:tenantId/api-keys")
 @UseGuards(AdminTokenGuard)
@@ -25,8 +22,8 @@ export class AdminApiKeysController {
   /** The plaintext key is returned only in this response. */
   @Post()
   async create(@Param("tenantId", ParseUUIDPipe) tenantId: string, @Body() body: unknown) {
-    const { name } = parseBody(createBody, body);
-    const { key, info } = await this.apiKeys.create(tenantId, name);
+    const { name, direct } = parseBody(apiKeyBody, body);
+    const { key, info } = await this.apiKeys.create(tenantId, name, { direct });
     return { key, ...info };
   }
 

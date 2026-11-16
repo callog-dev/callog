@@ -15,7 +15,7 @@ dm: true
 template:
   - header: "Deployed {{ data.service }}"
   - text: "**{{ data.version }}** by {{ recipients | mention }} <script>"
-  - buttons: [{ text: Diff, url: "https://git.example/{{ data.version }}" }]
+  - actions: [{ text: Diff, url: "https://git.example/{{ data.version }}" }]
 examples:
   - data: { service: api, version: v2 }
     recipients: [github:bob]

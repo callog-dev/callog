@@ -15,7 +15,7 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { ownValue, parseRef, type ConfigIssue, type Ref } from "@callog/config-schema";
+import { ownValue, parseRef, slugSchema, type ConfigIssue, type Ref } from "@callog/config-schema";
 import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { parseBody } from "../admin/parse-body";
@@ -35,9 +35,11 @@ import { AuditService } from "../audit/audit.service";
 import { LifecycleJobs } from "../lifecycle/lifecycle.jobs";
 import { RetentionService } from "../lifecycle/retention.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { TraceService } from "../notifications/trace.service";
 import { PreferencesService } from "../identity/preferences.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
-import { apiKeyNameSchema, ApiKeysService } from "../producers/api-keys.service";
+import { apiKeyBody, apiKeyNameSchema, ApiKeysService } from "../producers/api-keys.service";
+import { HooksService } from "../producers/hooks.service";
 import {
   asBadRequest as asSlackBadRequest,
   slackConnectBody,
@@ -100,7 +102,7 @@ const peopleQuery = z.object({
 });
 const newerQuery = notificationsQuery.omit({ before: true }).extend({ after: z.uuid() });
 const versionsQuery = z.object({ before: z.iso.datetime({ offset: true }).optional() });
-const apiKeyBody = z.object({ name: apiKeyNameSchema });
+const hookBody = z.object({ name: apiKeyNameSchema, route: slugSchema });
 const adminBody = z.object({ personId: z.uuid() });
 
 /** The problems stored with a config version (`errors` holds both lists). */
@@ -151,6 +153,8 @@ export class AdminApiController {
     private readonly loader: ConfigLoader,
     private readonly people: PeopleService,
     private readonly apiKeys: ApiKeysService,
+    private readonly hooks: HooksService,
+    private readonly trace: TraceService,
     private readonly slack: SlackConnectionsService,
     private readonly slackEvents: SlackEvents,
     private readonly telegram: TelegramConnectionsService,
@@ -315,7 +319,6 @@ export class AdminApiController {
       .from(notifications)
       .where(and(eq(notifications.tenantId, req.session!.tenantId), eq(notifications.id, id)));
     if (!n) throw new NotFoundException();
-    const ds = await this.db.select().from(deliveries).where(eq(deliveries.notificationId, id));
     return {
       id: n.id,
       route: n.routeId,
@@ -325,15 +328,9 @@ export class AdminApiController {
       recipients: n.recipients,
       threadKey: n.threadKey,
       update: n.update,
+      urgency: n.urgency,
       createdAt: n.createdAt,
-      deliveries: ds.map((d) => ({
-        provider: d.provider,
-        destination: d.destination,
-        status: d.status,
-        attempts: d.attempts,
-        lastError: d.lastError,
-        sentAt: d.sentAt,
-      })),
+      ...(await this.trace.of(n)),
     };
   }
 
@@ -563,8 +560,8 @@ export class AdminApiController {
 
   @Post("api-keys")
   async createKey(@Req() req: SessionRequest, @Body() body: unknown) {
-    const { name } = parseBody(apiKeyBody, body);
-    const { key, info } = await this.apiKeys.create(req.session!.tenantId, name);
+    const { name, direct } = parseBody(apiKeyBody, body);
+    const { key, info } = await this.apiKeys.create(req.session!.tenantId, name, { direct });
     return { key, ...info };
   }
 
@@ -572,6 +569,63 @@ export class AdminApiController {
   @HttpCode(204)
   async revokeKey(@Req() req: SessionRequest, @Param("name") name: string): Promise<void> {
     if (!(await this.apiKeys.revoke(req.session!.tenantId, name))) throw new NotFoundException();
+  }
+
+  // ---- Hooks ----
+
+  /** `routeMissing`: the route left the config, so posts to the hook are refused. */
+  @Get("hooks")
+  async listHooks(@Req() req: SessionRequest) {
+    const { tenantId } = req.session!;
+    const [hooks, active] = await Promise.all([
+      this.hooks.list(tenantId),
+      this.configs.getActive(tenantId),
+    ]);
+    const routes = active?.config.routes ?? {};
+    return hooks.map((hook) => ({ ...hook, routeMissing: !ownValue(routes, hook.routeId) }));
+  }
+
+  /** The path holds the token and is returned once: it is the only credential of the hook. */
+  @Post("hooks")
+  async createHook(@Req() req: SessionRequest, @Body() body: unknown) {
+    const { name, route } = parseBody(hookBody, body);
+    const { tenantId } = req.session!;
+    const routes = (await this.configs.getActive(tenantId))?.config.routes ?? {};
+    if (!ownValue(routes, route)) {
+      throw new NotFoundException(`Route "${route}" is not in the active config`);
+    }
+    const { token, info } = await this.hooks.create(tenantId, name, route);
+    return { path: `/v1/hooks/${token}`, ...info };
+  }
+
+  @Delete("hooks/:name")
+  @HttpCode(204)
+  async revokeHook(@Req() req: SessionRequest, @Param("name") name: string): Promise<void> {
+    if (!(await this.hooks.revoke(req.session!.tenantId, name))) throw new NotFoundException();
+  }
+
+  // ---- Places ----
+
+  /** The places of the active config: the room behind each name, and the routes that use it. */
+  @Get("places")
+  async listPlaces(@Req() req: SessionRequest) {
+    const config = (await this.configs.getActive(req.session!.tenantId))?.config;
+    if (!config) return [];
+    const routes = Object.values(config.routes);
+    const places = Object.entries(config.places).sort(([a], [b]) => a.localeCompare(b));
+    return places.map(([name, place]) => {
+      const [channel, room] =
+        "slack" in place ? ["slack", place.slack] : ["telegram", place.telegram];
+      return {
+        name,
+        channel,
+        room,
+        routes: routes
+          .filter((r) => r.destinations.some((d) => "place" in d && d.place === name))
+          .map((r) => r.id),
+        defaultFor: routes.filter((r) => r.default_place === name).map((r) => r.id),
+      };
+    });
   }
 
   // ---- Config and integrations ----
@@ -699,11 +753,12 @@ export class AdminApiController {
     const { tenantId, personId } = req.session!;
     const tenant = (await this.tenants.findById(tenantId))!;
     const configRepo = configRepoOf(tenant);
-    const [slack, telegram, active, latest, [delivered]] = await Promise.all([
+    const [slack, telegram, active, latest, hooks, [delivered]] = await Promise.all([
       this.slack.find(tenantId),
       this.telegram.find(tenantId),
       this.configs.getActive(tenantId),
       this.configs.latest(tenantId),
+      this.hooks.list(tenantId),
       this.db
         .select({ id: deliveries.id })
         .from(deliveries)
@@ -727,6 +782,8 @@ export class AdminApiController {
         errors: latest?.status === "invalid" ? issuesOf(latest).errors.slice(0, 3) : [],
       },
       firstNotification: { done: delivered !== undefined },
+      /** A system that sends its own webhooks (alerts) has somewhere to post. */
+      hooks: { done: hooks.some((hook) => !hook.revokedAt), optional: true },
     };
     return {
       steps,

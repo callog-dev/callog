@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: npm test
-      - uses: callog-dev/callog/packages/action@v0.4.0
+      - uses: callog-dev/callog/packages/action@v0.5.0
         if: failure()
         with:
           url: https://notify.company.internal
@@ -31,19 +31,19 @@ The route must allow the repository: `allowed_sources.github_repos: [org/repo]`.
 
 ## Inputs
 
-| Input             | Default  |                                                                             |
-| ----------------- | -------- | --------------------------------------------------------------------------- |
-| `url`             | —        | Callog server URL, reachable from the runner                                |
-| `route`           | —        | Route id (`routes/<id>.yaml`)                                               |
-| `data`            | `{}`     | JSON object for the template; validated against the route `schema`          |
-| `recipients`      |          | `github:login`, `team:slug`, `email:…`, comma or newline separated          |
-| `mention-author`  | `false`  | Add the commit/PR author (or the actor)                                     |
-| `thread-key`      |          | Same key → same thread                                                      |
-| `update`          | `false`  | Edit the thread's first message (needs `thread-key`)                        |
-| `idempotency-key` | derived  | Default: run + attempt + job + request, so a retried step is not duplicated |
-| `api-key`         |          | Use an API key instead of OIDC                                              |
-| `audience`        | `callog` | OIDC audience expected by the server                                        |
-| `fail-on-error`   | `false`  | By default a failed notification is only a warning                          |
+| Input             | Default  |                                                                                  |
+| ----------------- | -------- | -------------------------------------------------------------------------------- |
+| `url`             | —        | Callog server URL, reachable from the runner                                     |
+| `route`           | —        | Route id (`routes/<id>.yaml`)                                                    |
+| `data`            | `{}`     | JSON object for the template; validated against the route `schema`               |
+| `recipients`      |          | `github:login`, `team:slug`, `email:…`, `place:name`; comma or newline separated |
+| `mention-author`  | `false`  | Add the commit/PR author (or the actor)                                          |
+| `thread-key`      |          | Same key → same thread                                                           |
+| `update`          | `false`  | Edit the thread's first message (needs `thread-key`)                             |
+| `idempotency-key` | derived  | Default: run + attempt + job + request, so a retried step is not duplicated      |
+| `api-key`         |          | Use an API key instead of OIDC                                                   |
+| `audience`        | `callog` | OIDC audience expected by the server                                             |
+| `fail-on-error`   | `false`  | By default a failed notification is only a warning                               |
 
 Matrix legs share the job name, so legs that send identical requests get the same default key
 and only the first one is delivered. Add the leg to the key when that can happen:

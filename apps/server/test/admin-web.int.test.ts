@@ -569,10 +569,53 @@ teams:
     expect(created.key).toMatch(/^ntf_/);
     expect((await call("GET", "/api/admin/api-keys")).json()[0]).toMatchObject({
       name: "billing",
+      direct: false,
       revokedAt: null,
     });
+    expect(
+      (await call("POST", "/api/admin/api-keys", { name: "ops", direct: true })).json(),
+    ).toMatchObject({ name: "ops", direct: true });
     expect((await call("DELETE", "/api/admin/api-keys/billing")).statusCode).toBe(204);
     expect((await call("GET", "/api/admin/api-keys")).json()[0].revokedAt).not.toBeNull();
+  });
+
+  it("lists the places of the config with the routes that use them", async () => {
+    await activateConfig(
+      app,
+      tenantId,
+      {
+        "places.yaml": 'places: { deploys: { slack: "#deploys" }, lost: { telegram: "-1001" } }',
+        "routes/a.yaml":
+          "id: a\nallowed_sources: { api_keys: [ci] }\ndestinations: [{ place: deploys }]\ntemplate: [{ text: hi }]",
+        "routes/b.yaml":
+          "id: b\nallowed_sources: { api_keys: [ci] }\ndefault_place: lost\ntemplate: [{ text: hi }]",
+      },
+      "def",
+    );
+    expect((await call("GET", "/api/admin/places")).json()).toEqual([
+      { name: "deploys", channel: "slack", room: "#deploys", routes: ["a"], defaultFor: [] },
+      { name: "lost", channel: "telegram", room: "-1001", routes: [], defaultFor: ["b"] },
+    ]);
+  });
+
+  it("manages hooks", async () => {
+    const created = (
+      await call("POST", "/api/admin/hooks", { name: "grafana", route: "r" })
+    ).json();
+    expect(created.path).toMatch(/^\/v1\/hooks\/hk_/);
+    expect(created).toMatchObject({ name: "grafana", routeId: "r" });
+    expect((await call("GET", "/api/admin/hooks")).json()[0]).toMatchObject({
+      name: "grafana",
+      routeMissing: false,
+    });
+    expect(JSON.stringify((await call("GET", "/api/admin/hooks")).json())).not.toContain(
+      created.path,
+    );
+    expect(
+      (await call("POST", "/api/admin/hooks", { name: "other", route: "nope" })).statusCode,
+    ).toBe(404);
+    expect((await call("DELETE", "/api/admin/hooks/grafana")).statusCode).toBe(204);
+    expect((await call("GET", "/api/admin/hooks")).json()[0].revokedAt).not.toBeNull();
   });
 
   it("reloads the config", async () => {

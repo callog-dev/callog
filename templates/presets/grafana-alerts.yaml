@@ -1,0 +1,74 @@
+# Alerts from Grafana Alerting, posted to Callog by a webhook contact point.
+#
+# 1. Copy this file to routes/grafana-alerts.yaml in your config repo.
+# 2. Set default_place to a place of yours (places.yaml).
+# 3. In Callog, Settings → Hooks, create a hook for the route `grafana-alerts`.
+# 4. In Grafana, add a contact point of type Webhook:
+#      URL                        https://<your Callog>/v1/hooks
+#      Authorization credentials  the hook's token (the hk_… part of the URL Callog shows)
+#    Grafana stores the URL as plain text, so the token goes into the credentials field.
+#
+# A group of alerts that keeps firing edits one message instead of posting again, and the
+# same message turns to "resolved" when Grafana says so. When the group fires again later,
+# that is a new incident and a new message: an edit would notify nobody.
+id: grafana-alerts
+description: Alerts from Grafana Alerting
+default_place: alerts
+# Who else hears about it: give the alert rule a label `callog_notify`, for example
+# `team:sre` or `github:octocat place:oncall`. Grafana passes the label on only when every
+# alert of the group has the same value.
+recipients:
+  - "{{ data.commonLabels.callog_notify }}"
+dm: true
+group:
+  # One incident: Grafana's key of the alert group, and when its earliest alert started.
+  # Both stay the same while the group fires and when it resolves, and the start changes
+  # when it fires again. (A group whose earliest alert resolves on its own while the others
+  # go on firing continues in a new message.)
+  key: "{{ data.groupKey }} {{ data.alerts | map: 'startsAt' | sort | first }}"
+  window: 12h
+template:
+  - header: "{% if data.status == 'resolved' %}✅ Resolved{% else %}🔥 Firing{% endif %}: {{ data.commonLabels.alertname | default: data.title | default: 'Grafana alert' }}"
+  - text: "{{ data.commonAnnotations.summary | default: data.commonAnnotations.description | default: data.title | default: 'No summary' }}"
+  - fields:
+      - label: Alerts
+        value: "{{ data.alerts | size }}{% if data.truncatedAlerts > 0 %} (+{{ data.truncatedAlerts }} more){% endif %}"
+      - label: Where
+        value: "{% for alert in data.alerts limit: 5 %}{{ alert.labels.instance | default: alert.labels.alertname | default: 'unknown' }}{% unless forloop.last %}, {% endunless %}{% endfor %}"
+  - actions:
+      - text: Open in Grafana
+        # A button needs a URL. Grafana always sends externalURL; the last one is never used
+        # in practice and only keeps a hand-made test payload from failing.
+        url: "{{ data.alerts[0].generatorURL | default: data.externalURL | default: 'https://grafana.com' }}"
+examples:
+  - data:
+      receiver: callog
+      status: firing
+      orgId: 1
+      alerts:
+        - status: firing
+          labels: { alertname: HighCPU, instance: db-1, callog_notify: "team:sre" }
+          annotations: { summary: "CPU is above 90% for 5 minutes" }
+          startsAt: "2026-01-01T10:00:00Z"
+          endsAt: "0001-01-01T00:00:00Z"
+          values: { A: 97.2 }
+          generatorURL: "https://grafana.example.com/alerting/grafana/abc/view"
+          fingerprint: 1a2b3c4d5e6f7a8b
+        - status: firing
+          labels: { alertname: HighCPU, instance: db-2, callog_notify: "team:sre" }
+          annotations: { summary: "CPU is above 90% for 5 minutes" }
+          startsAt: "2026-01-01T10:01:00Z"
+          endsAt: "0001-01-01T00:00:00Z"
+          values: { A: 93.5 }
+          generatorURL: "https://grafana.example.com/alerting/grafana/abc/view"
+          fingerprint: 9f8e7d6c5b4a3f2e
+      groupLabels: { alertname: HighCPU }
+      commonLabels: { alertname: HighCPU, callog_notify: "team:sre" }
+      commonAnnotations: { summary: "CPU is above 90% for 5 minutes" }
+      externalURL: "https://grafana.example.com/"
+      version: "1"
+      groupKey: '{}:{alertname="HighCPU"}'
+      truncatedAlerts: 0
+      title: "[FIRING:2] HighCPU"
+      state: alerting
+      message: "CPU is above 90% for 5 minutes"

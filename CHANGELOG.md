@@ -6,6 +6,86 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
+## [0.5.0]
+
+### Added
+
+- Places: `places.yaml` gives rooms a name (`deploys: { slack: "#deploys" }`). A route delivers
+  to `place: <name>`, and a sender can add `place:<name>` to `recipients` to post there too —
+  without knowing which messenger or channel is behind the name.
+- Hooks: an admin binds a token to one route, and any JSON object posted with it becomes the
+  notification's `data`. A sender that can set a header posts to `/v1/hooks` with
+  `Authorization: Bearer <token>`; one that cannot posts to `/v1/hooks/<token>`. The token is
+  shown once; a hook is revoked by name. A route only hooks post to needs no
+  `allowed_sources`.
+- The Getting started checklist has an optional step for alert sources.
+- The Helm chart has `sendersIngress`: a public host that serves only the sender API under
+  `/v1/`, for senders outside the cluster.
+- Presets: ready-made routes for systems that send their own webhooks, in
+  `templates/presets`. The first one is for Grafana Alerting.
+- `mandatory: true` on a route: people cannot mute it, and a mute they set earlier does not
+  hold.
+- `urgency` on a notification (`low`, `normal`, `high`) and on a route (`default` and `max`).
+  It is recorded and checked against the route, and nothing acts on it yet.
+- A route can add recipients on its own with `recipients`: Liquid templates over `data` that
+  render to people, teams or places (`github:{{ data.commit.author }}`). What does not render
+  to a recipient is left out, so a webhook payload never fails the request.
+- A built-in `direct` route: plain text (`data.text`) to the people and places in
+  `recipients`, without a route in the config. People get it as a personal message. Only API
+  keys created with `direct` may use it.
+- Grouping: a route with `group: { key, window }` turns repeats of the same thing — an alert
+  that keeps firing — into edits of one message, with a line saying how many times it
+  repeated. `key` is a Liquid template over `data`; a group stays open for `window` (up to
+  24h) after its first notification.
+- A route without `destinations` names a `default_place`: where a notification is posted when
+  it reaches nobody else — its recipients name no place and get no personal copy.
+
+- A personal copy that cannot be delivered — the messenger refuses it, or the attempts run
+  out — is sent another way: in the person's other messenger, then in the room of the team
+  they were named through, then in the route's `default_place`, with a line saying whom the
+  post is for. People with no account in any messenger start at the room; a team with nobody
+  to write to is posted to its room.
+- A delivery trace. Admins see what happened on the way to each recipient: whom each delivery
+  is for, which delivery took over a failed one, who was left out and why (muted the route,
+  no account in any messenger, unknown, a team with nobody to write to), and whether the
+  notification joined a group. `GET /v1/notifications/<id>` tells a sender which of the
+  recipients it named led nowhere and which delivery took over a failed one — nothing about
+  the people themselves.
+- In the web UI: a route's page says when a place is only its fallback, when the route adds
+  recipients from the data, and when it groups repeats.
+- In the web UI: a notification's page traces its deliveries — whom each is for, what took
+  over a refused one, who was left out and why; Settings → Hooks creates and revokes hooks;
+  Places lists the rooms behind each name with the routes that use them; an API key can be
+  created with direct messages allowed.
+- Recipients of a route with personal copies who have no account in any messenger show up
+  among the unmapped recipients.
+
+### Changed
+
+- Muting a route now also stops its mentions. A Slack user group with a member who muted the
+  route is mentioned member by member, without that person.
+- Retrying a notification leaves alone the deliveries that another one took over.
+- **Breaking:** a route describes its message with `template` only. The `slack_blocks` key is
+  gone, and the `buttons` block is now `actions`.
+- Every channel shows every block: a block a channel cannot draw is sent as text in that
+  channel's formatting.
+- A mention in a `header` or in the text of an action is written as the person's name.
+
+### Operator actions
+
+- Change the config repo before upgrading the server; the steps are in
+  [docs/upgrade.md](docs/upgrade.md#050).
+- Database migrations add the `hooks` table and columns to `notifications`, `api_keys` and
+  `deliveries`; they run on
+  start unless `MIGRATE_ON_START=false`.
+- `direct` is now a reserved route id: rename a route of yours that has it.
+- Recipients that start with `oncall:` are refused: the prefix is kept for a later release.
+- `thread_key` values that start with `group:` are refused: those threads belong to grouping.
+- A hook's token is part of its URL. Keep request paths under `/v1/hooks/` out of access logs
+  of the proxy in front of Callog, and make that path reachable from the systems that send.
+- In the config repo, rename `buttons:` to `actions:` in route templates and rewrite routes
+  that use `slack_blocks` with `template` blocks. `notify validate` reports both.
+
 ## [0.4.0]
 
 ### Added

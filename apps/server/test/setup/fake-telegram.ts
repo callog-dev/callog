@@ -20,6 +20,8 @@ export class FakeTelegram {
   sent: { chatId: string; message: TelegramMessage; options?: TelegramSendOptions }[] = [];
   failures: TelegramApiError[] = [];
   edited: { chatId: string; messageId: number; message: TelegramMessage }[] = [];
+  /** Messages deleted in Telegram: editing one fails. */
+  deletedIds = new Set<number>();
   /** Served by getUpdates (respecting offset). */
   updates: TelegramUpdate[] = [];
   getUpdatesOffsets: number[] = [];
@@ -49,6 +51,9 @@ export class FakeTelegram {
       },
       editMessage: async (chatId, messageId, message) => {
         check();
+        if (this.deletedIds.has(messageId)) {
+          throw new TelegramApiError(400, "Bad Request: message to edit not found");
+        }
         this.edited.push({ chatId, messageId, message });
         return { chatId, messageId };
       },

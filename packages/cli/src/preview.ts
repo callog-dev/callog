@@ -1,4 +1,4 @@
-import { ownValue, type Config, type Route } from "@callog/config-schema";
+import { ownValue, type Config, type Place, type Route } from "@callog/config-schema";
 import {
   renderSlack,
   renderTelegram,
@@ -35,12 +35,15 @@ export function previewMarkdown(
 function routeSection(route: Route, config: Config, file?: string): string[] {
   const lines = [`### \`${route.id}\`${route.description ? ` — ${route.description}` : ""}`, ""];
   const targets = route.destinations.map((d) =>
-    "slack" in d
-      ? `Slack ${d.slack}`
-      : "telegram" in d
-        ? `Telegram ${d.telegram}`
-        : `team ${d.team}${teamChannels(config, d.team)}`,
+    "team" in d
+      ? `team ${d.team}${teamChannels(config, d.team)}`
+      : "place" in d
+        ? namedPlace(config, d.place)
+        : room(d),
   );
+  if (route.default_place) {
+    targets.push(`${namedPlace(config, route.default_place)} when it reaches nobody else`);
+  }
   lines.push(`**To:** ${targets.join(", ")}${route.dm ? " · personal copies to recipients" : ""}`);
   const sources = [
     ...route.allowed_sources.github_repos.map((r) => `\`${r}\``),
@@ -49,7 +52,7 @@ function routeSection(route: Route, config: Config, file?: string): string[] {
   lines.push(`**From:** ${sources.join(", ")}`, "");
 
   const examples = route.examples.length > 0 ? route.examples : [{ data: {}, recipients: [] }];
-  const toTelegram = route.template && reachesTelegram(route, config);
+  const toTelegram = reachesTelegram(route, config);
   examples.forEach((example, i) => {
     if (route.examples.length > 1) lines.push(`#### Example ${i + 1}`, "");
     try {
@@ -92,10 +95,25 @@ function teamChannels(config: Config, slug: string): string {
   return channels.length ? ` (${channels.join(", ")})` : "";
 }
 
+function room(place: Place): string {
+  return "slack" in place ? `Slack ${place.slack}` : `Telegram ${place.telegram}`;
+}
+
+function namedPlace(config: Config, name: string): string {
+  const place = ownValue(config.places, name);
+  return `place ${name}${place ? ` (${room(place)})` : ""}`;
+}
+
 function reachesTelegram(route: Route, config: Config): boolean {
-  return route.destinations.some(
-    (d) =>
-      "telegram" in d || ("team" in d && Boolean(ownValue(config.teams, d.team)?.telegram_chat)),
+  const isTelegram = (name: string) => "telegram" in (ownValue(config.places, name) ?? {});
+  return (
+    (route.default_place !== undefined && isTelegram(route.default_place)) ||
+    route.destinations.some(
+      (d) =>
+        "telegram" in d ||
+        ("place" in d && isTelegram(d.place)) ||
+        ("team" in d && Boolean(ownValue(config.teams, d.team)?.telegram_chat)),
+    )
   );
 }
 
@@ -142,16 +160,13 @@ export function slackBlocksToMarkdown(blocks: SlackBlock[]): string {
         break;
       case "actions":
         out.push(
-          ((block.elements as { text: { text: string }; url?: string }[]) ?? [])
-            .map((b) => `[\`${b.text.text}\`](${b.url ?? "#"})`)
+          ((block.elements as { text: { text: string }; url: string }[]) ?? [])
+            .map((b) => `[\`${b.text.text}\`](${b.url})`)
             .join(" "),
         );
         break;
       case "divider":
         out.push("———");
-        break;
-      default:
-        out.push(`_(${block.type} block)_`);
     }
   }
   return out.join("\n\n");

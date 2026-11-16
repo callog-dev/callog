@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { ChannelsModule } from "../channels/channels.module";
 import { IdentityModule } from "../identity/identity.module";
 import { LifecycleModule } from "../lifecycle/lifecycle.module";
 import { NotificationsModule } from "../notifications/notifications.module";
@@ -18,6 +19,7 @@ import { SessionsService } from "./sessions.service";
 
 @Module({
   imports: [
+    ChannelsModule,
     IdentityModule,
     LifecycleModule,
     NotificationsModule,

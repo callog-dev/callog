@@ -17,6 +17,9 @@ const CONFIG = (route: string) => ({
 teams:
   fe: { slack_channel: "#fe" }
   tg: { telegram_chat: tg-chat }`,
+  "places.yaml": `
+places:
+  deploys: { slack: "#deploys" }`,
   "routes/r.yaml": route,
 });
 
@@ -52,6 +55,7 @@ describe("delivery (integration)", () => {
     slack.channels = [
       { id: "C0ALERTS1", name: "alerts" },
       { id: "C0FE00001", name: "fe" },
+      { id: "C0DEPLOY1", name: "deploys" },
     ];
     tenantId = await createTenant(app, 800);
     await app.get(SlackConnectionsService).connect(tenantId, GOOD_SLACK_TOKEN);
@@ -112,6 +116,47 @@ describe("delivery (integration)", () => {
     });
     const unmapped = await db.select().from(unmappedRecipients);
     expect(unmapped).toEqual([expect.objectContaining({ ref: "github:ghost", occurrences: 1 })]);
+  });
+
+  it("also posts to the places the recipients name, without mentioning them", async () => {
+    const id = await createNotification(["github:bob", "place:deploys"]);
+
+    expect(await service.deliver(id, { attempt: 1, maxAttempts: 8 })).toBe("delivered");
+
+    expect(slack.posted.map((p) => p.channel).sort()).toEqual([
+      "C0ALERTS1",
+      "C0DEPLOY1",
+      "C0FE00001",
+    ]);
+    expect(slack.posted[0]!.message.text).toBe("Failed on main by <@UBOB>");
+    expect(await db.select().from(unmappedRecipients)).toEqual([]);
+  });
+
+  describe("a route with only a default place", () => {
+    beforeEach(async () => {
+      await setup(`
+id: r
+allowed_sources: { api_keys: [ci] }
+default_place: deploys
+dm: true
+template: [{ text: "Failed on {{ data.branch }}" }]`);
+    });
+
+    it("posts there when the notification reaches nobody", async () => {
+      const id = await createNotification(["github:ghost"]);
+
+      expect(await service.deliver(id, { attempt: 1, maxAttempts: 8 })).toBe("delivered");
+
+      expect((await rowsOf(id)).map((r) => r.destination)).toEqual(["#deploys"]);
+    });
+
+    it("stays out of the way when a recipient gets a personal copy", async () => {
+      const id = await createNotification(["github:bob"]);
+
+      expect(await service.deliver(id, { attempt: 1, maxAttempts: 8 })).toBe("delivered");
+
+      expect((await rowsOf(id)).map((r) => r.destination)).toEqual(["dm:UBOB"]);
+    });
   });
 
   it("retries only what failed transiently and never re-sends delivered messages", async () => {
@@ -222,7 +267,7 @@ template: [{ text: hi }]`);
 id: r
 allowed_sources: { api_keys: [ci] }
 destinations: [{ slack: "#alerts" }]
-template: [{ buttons: [{ text: Go, url: "{{ data.branch }}" }] }]`);
+template: [{ actions: [{ text: Go, url: "{{ data.branch }}" }] }]`);
     const id = await createNotification([]);
 
     expect(await service.deliver(id, { attempt: 1, maxAttempts: 8 })).toBe("failed");
