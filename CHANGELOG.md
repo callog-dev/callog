@@ -6,7 +6,7 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
-## [Unreleased]
+## [0.5.0]
 
 ### Added
 
@@ -74,7 +74,7 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 ### Operator actions
 
 - Change the config repo before upgrading the server; the steps are in
-  [docs/upgrade.md](docs/upgrade.md#unreleased).
+  [docs/upgrade.md](docs/upgrade.md#050).
 - Database migrations add the `hooks` table and columns to `notifications`, `api_keys` and
   `deliveries`; they run on
   start unless `MIGRATE_ON_START=false`.

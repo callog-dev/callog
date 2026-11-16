@@ -75,7 +75,7 @@ Only versions that need manual steps are listed here.
 - With `MIGRATE_ON_START=false`, grant the server's role access to the new `telegram_chats`
   table after applying the migrations (see [setup.md → Migrations](setup.md#5-migrations)).
 
-### Unreleased
+### 0.5.0
 
 Change the config repo first, then upgrade. The old version rejects a config it does not understand and
 goes on with its previous one; the new version loads the repo when it starts. Upgrading without the
