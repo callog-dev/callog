@@ -753,11 +753,12 @@ export class AdminApiController {
     const { tenantId, personId } = req.session!;
     const tenant = (await this.tenants.findById(tenantId))!;
     const configRepo = configRepoOf(tenant);
-    const [slack, telegram, active, latest, [delivered]] = await Promise.all([
+    const [slack, telegram, active, latest, hooks, [delivered]] = await Promise.all([
       this.slack.find(tenantId),
       this.telegram.find(tenantId),
       this.configs.getActive(tenantId),
       this.configs.latest(tenantId),
+      this.hooks.list(tenantId),
       this.db
         .select({ id: deliveries.id })
         .from(deliveries)
@@ -781,6 +782,8 @@ export class AdminApiController {
         errors: latest?.status === "invalid" ? issuesOf(latest).errors.slice(0, 3) : [],
       },
       firstNotification: { done: delivered !== undefined },
+      /** A system that sends its own webhooks (alerts) has somewhere to post. */
+      hooks: { done: hooks.some((hook) => !hook.revokedAt), optional: true },
     };
     return {
       steps,

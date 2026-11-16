@@ -78,9 +78,30 @@ webhookIngress:
 
 To limit the webhook host to GitHub, allow the `hooks` ranges from
 `https://api.github.com/meta`; they change, so keep them current. The webhook signature is
-checked either way. GitHub Actions call `/v1/notify`: runners inside the cluster can use the
-api Service, `http://callog-api.<namespace>.svc.cluster.local:3000` for a release named
-`callog` (`<release>-callog-api` for other names).
+checked either way.
+
+### Senders
+
+Whatever sends notifications has to reach the sender API under `/v1/`: GitHub Actions and
+services call `/v1/notify`, alerting systems post to `/v1/hooks`. Senders inside the cluster —
+self-hosted runners, a Grafana in the same cluster — use the api Service,
+`http://callog-api.<namespace>.svc.cluster.local:3000` for a release named `callog`
+(`<release>-callog-api` for other names), and nothing more has to be exposed.
+
+For senders outside the cluster, such as GitHub-hosted runners, add `sendersIngress` on a
+public host. It serves only `/v1/`: the UI and the admin API stay on the internal host.
+
+```yaml
+sendersIngress:
+  enabled: true
+  className: nginx
+  host: callog-api.example.com
+```
+
+Every request there carries a credential: an OIDC token, an API key or a hook's token. A hook's
+token can come in the URL (`/v1/hooks/<token>`), for systems that cannot set a header; keep
+those paths out of the ingress's access log, or have the system send
+`Authorization: Bearer <token>` to `/v1/hooks` instead.
 
 For an App created before the webhook host existed, change its Webhook URL in the App's settings
 on GitHub.
@@ -99,6 +120,7 @@ labels) are in [values.yaml](values.yaml).
 | `api.replicas`                   | `1`                      | The worker has no such setting                                                      |
 | `migrations.enabled`             | `true`                   | Off when your DBA applies migrations ([setup.md](../../docs/setup.md#5-migrations)) |
 | `ingress.*`, `webhookIngress.*`  | off                      | `enabled`, `className`, `annotations`, `host`, `tls`                                |
+| `sendersIngress.*`               | off                      | The same, for a public host that serves only `/v1/` ([Senders](#senders))           |
 | `metrics.podMonitor.enabled`     | `false`                  | Prometheus Operator `PodMonitor` for api and worker pods                            |
 | `metrics.podMonitor.bearerToken` | `false`                  | Send `METRICS_TOKEN` from the Secret                                                |
 

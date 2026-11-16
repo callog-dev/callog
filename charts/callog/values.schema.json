@@ -197,6 +197,30 @@
         }
       }
     },
+    "sendersIngress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "host": {
+          "type": "string"
+        },
+        "tls": {
+          "type": "array"
+        }
+      }
+    },
     "metrics": {
       "type": "object",
       "additionalProperties": false,

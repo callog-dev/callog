@@ -14,6 +14,10 @@ webhookIngress:
   enabled: true
   className: nginx
   host: callog-hooks.example.com
+sendersIngress:
+  enabled: true
+  className: nginx
+  host: callog-api.example.com
 worker:
   nodeSelector:
     node-lifecycle: on-demand

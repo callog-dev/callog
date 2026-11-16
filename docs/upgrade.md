@@ -74,3 +74,27 @@ Only versions that need manual steps are listed here.
   An installation that has Slack or Telegram connected already has it.
 - With `MIGRATE_ON_START=false`, grant the server's role access to the new `telegram_chats`
   table after applying the migrations (see [setup.md → Migrations](setup.md#5-migrations)).
+
+### Unreleased
+
+Change the config repo first, then upgrade. The old version rejects a config it does not understand and
+goes on with its previous one; the new version loads the repo when it starts. Upgrading without the
+change leaves the stored config in place under code that no longer reads all of it: a route
+with `slack_blocks` cannot be delivered, a `buttons` block is not shown, and the next push is
+rejected.
+
+- In route templates, rename the block `buttons:` to `actions:`.
+- Rewrite routes that use `slack_blocks` with `template` blocks; the key is gone.
+- Rename a route called `direct`: the id now belongs to a built-in route.
+- Recipients that start with `oncall:`, and `thread_key` values that start with `group:`, are
+  refused. Senders that use either have to change.
+- Muting a route now also stops its mentions. Nothing to do, but tell people: someone who muted
+  a route to stop its direct messages is no longer mentioned in its channels either.
+- Six database migrations add the `hooks` table and columns to `notifications`, `api_keys` and
+  `deliveries`. With `MIGRATE_ON_START=false`, grant the server's role access to `hooks` after
+  applying them (see [setup.md → Migrations](setup.md#5-migrations)).
+- On Kubernetes, senders outside the cluster need a way to `/v1/`: see `sendersIngress` in the
+  [chart's README](../charts/callog/README.md#senders).
+
+`notify validate` from this version reports the first three in a pull request to the config
+repo, before anything is deployed.

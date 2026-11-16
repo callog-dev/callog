@@ -347,6 +347,7 @@ export interface Onboarding {
     telegram: { done: boolean; optional: true; bot: string | null };
     config: { done: boolean; repo: string; rejected: boolean; errors: ConfigIssue[] };
     firstNotification: { done: boolean };
+    hooks: { done: boolean; optional: true };
   };
   complete: boolean;
 }

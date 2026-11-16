@@ -194,6 +194,7 @@ examples: [{ data: { text: Hi } }]`,
         telegram: { done: false, optional: true, bot: null },
         config: { done: false, repo: "acme/notify-config", rejected: false, errors: [] },
         firstNotification: { done: false },
+        hooks: { done: false, optional: true },
       },
       complete: false,
     });

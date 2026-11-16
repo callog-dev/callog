@@ -18,6 +18,9 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
   `Authorization: Bearer <token>`; one that cannot posts to `/v1/hooks/<token>`. The token is
   shown once; a hook is revoked by name. A route only hooks post to needs no
   `allowed_sources`.
+- The Getting started checklist has an optional step for alert sources.
+- The Helm chart has `sendersIngress`: a public host that serves only the sender API under
+  `/v1/`, for senders outside the cluster.
 - Presets: ready-made routes for systems that send their own webhooks, in
   `templates/presets`. The first one is for Grafana Alerting.
 - `mandatory: true` on a route: people cannot mute it, and a mute they set earlier does not
@@ -70,6 +73,8 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 
 ### Operator actions
 
+- Change the config repo before upgrading the server; the steps are in
+  [docs/upgrade.md](docs/upgrade.md#unreleased).
 - Database migrations add the `hooks` table and columns to `notifications`, `api_keys` and
   `deliveries`; they run on
   start unless `MIGRATE_ON_START=false`.

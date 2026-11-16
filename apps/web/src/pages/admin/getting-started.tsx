@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Circle, CircleAlert, RefreshCw } from "lucide-react";
+import { Link } from "react-router";
 import { useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -115,6 +116,17 @@ function stepList(steps: Onboarding["steps"], open: (dialog: Dialog) => void) {
       action: (
         <Button size="sm" disabled={!steps.config.done} onClick={() => open("test")}>
           Send test
+        </Button>
+      ),
+    },
+    {
+      title: "Receive alerts from a monitoring system",
+      done: steps.hooks.done,
+      optional: true,
+      hint: "A hook gives Grafana or any system that sends its own webhooks a URL to post to.",
+      action: (
+        <Button size="sm" variant="outline" asChild>
+          <Link to="/manage/settings/hooks">Hooks</Link>
         </Button>
       ),
     },

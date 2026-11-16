@@ -1,6 +1,11 @@
 {{- if .Values.ingress.enabled }}
 {{- include "callog.ingress" (dict "root" $ "values" .Values.ingress "name" (include "callog.fullname" .) "path" "/" "pathType" "Prefix") }}
 {{- end }}
+{{- if .Values.sendersIngress.enabled }}
+---
+{{- /* The senders host serves the sender API and nothing else: no UI, no admin API. */}}
+{{- include "callog.ingress" (dict "root" $ "values" .Values.sendersIngress "name" (printf "%s-senders" (include "callog.fullname" .)) "path" "/v1/" "pathType" "Prefix") | nindent 0 }}
+{{- end }}
 {{- if .Values.webhookIngress.enabled }}
 ---
 {{- /* The webhook host serves GitHub's deliveries and nothing else. */}}
