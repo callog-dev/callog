@@ -39,9 +39,21 @@ export interface RouteSummary {
   id: string;
   description: string | null;
   /** `label` is a human-readable name (Telegram chat title) when the server knows one. */
-  destinations: { provider: "slack" | "telegram"; destination: string; label?: string }[];
+  destinations: {
+    provider: "slack" | "telegram";
+    destination: string;
+    label?: string;
+    /** Posted to only when a notification reaches nobody else. */
+    fallback?: boolean;
+  }[];
   dm: boolean;
+  /** People cannot mute it. */
+  mandatory: boolean;
   mentions: "recipients" | "none";
+  /** Seconds a group of repeats stays open, when the route groups them. */
+  groupWindow: number | null;
+  /** The route names recipients itself, from the notification's data. */
+  addsRecipients: boolean;
   allowedSources: { github_repos: string[]; api_keys: string[] };
   dataFields: string[];
   muted: boolean;

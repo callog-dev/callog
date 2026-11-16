@@ -1,0 +1,1 @@
+ALTER TABLE "notifications" ADD COLUMN "urgency" text DEFAULT 'normal' NOT NULL;

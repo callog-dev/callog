@@ -8,6 +8,7 @@ import {
   REMOVED_FILES,
   REMOVED_KEYS,
   routeSchema,
+  isMoreUrgent,
   teamsFileSchema,
   type ConfigFile,
   type Place,
@@ -41,6 +42,8 @@ export const DIRECT_ROUTE: Route = {
   allowed_sources: { github_repos: [], api_keys: [] },
   destinations: [],
   recipients: [],
+  urgency: { default: "normal", max: "high" },
+  mandatory: false,
   mentions: "none",
   dm: true,
   schema: {
@@ -214,6 +217,9 @@ function checkRoutes(
       errors.push({ file, path, message: `unknown place "${name}" (not defined in places.yaml)` });
     };
     checkDataSchema(route, file, errors);
+    if (isMoreUrgent(route.urgency.default, route.urgency.max)) {
+      errors.push({ file, path: ["urgency", "default"], message: "must not be above max" });
+    }
     if (route.default_place) {
       checkPlace(["default_place"], route.default_place);
       if (route.destinations.length > 0) {

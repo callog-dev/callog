@@ -80,6 +80,21 @@ describe("inbound webhooks (integration)", () => {
     expect((await stored()).recipients).toEqual(["team:sre"]);
   });
 
+  it("takes the token from the Authorization header, keeping it out of the URL", async () => {
+    const inject = (authorization?: string) =>
+      app.inject({
+        method: "POST",
+        url: "/v1/hooks",
+        headers: { "content-type": "application/json", ...(authorization && { authorization }) },
+        payload: JSON.stringify({ title: "High CPU" }),
+      });
+
+    expect((await inject(`Bearer ${token}`)).statusCode).toBe(202);
+    expect((await stored()).source).toMatchObject({ type: "hook", hookName: "grafana" });
+    expect((await inject()).statusCode).toBe(401);
+    expect((await inject("Bearer hk_unknown")).statusCode).toBe(401);
+  });
+
   it("401 for an unknown or revoked token", async () => {
     expect((await post("{}", "hk_unknown")).statusCode).toBe(401);
     await hooks.revoke(tenantId, "grafana");

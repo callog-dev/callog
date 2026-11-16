@@ -39,10 +39,17 @@ export class PreferencesService {
     );
   }
 
-  /** Those of `personIds` who muted the route: no personal copy, no mention. */
-  async mutedAmong(personIds: string[], routeId: string): Promise<Set<string>> {
+  /**
+   * Those of `personIds` who muted the route: no personal copy, no mention. Nobody, for a
+   * mandatory route.
+   */
+  async mutedAmong(
+    personIds: string[],
+    route: { id: string; mandatory: boolean },
+  ): Promise<Set<string>> {
+    if (route.mandatory || personIds.length === 0) return new Set();
     const prefs = await this.getMany([...new Set(personIds)]);
-    return new Set(personIds.filter((id) => prefs.get(id)!.mutedRoutes.includes(routeId)));
+    return new Set(personIds.filter((id) => prefs.get(id)!.mutedRoutes.includes(route.id)));
   }
 
   async setDmChannel(tenantId: string, personId: string, dmChannel: DmChannel): Promise<void> {

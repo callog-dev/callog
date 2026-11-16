@@ -83,12 +83,13 @@ export class PersonalCopies {
     const teamRooms = (slug: string) => teamTargets(config, slug, this.channels);
     const lastResort = defaultTargets(route, config, this.channels);
     const prefs = await this.preferences.getMany([...people.keys()]);
+    const muted = await this.preferences.mutedAmong([...people.keys()], route);
     const copies = new CopySet();
     const notes: TraceNote[] = [];
     for (const [personId, { accounts, teams }] of people) {
       const recipient: Ref = `person:${personId}`;
       const pref = prefs.get(personId)!;
-      if (pref.mutedRoutes.includes(route.id)) {
+      if (muted.has(personId)) {
         notes.push({ recipient, note: "muted" });
         continue;
       }

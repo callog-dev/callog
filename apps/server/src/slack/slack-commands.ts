@@ -91,9 +91,13 @@ export class SlackCommands {
       return `Personal copies will go to *${value === "slack" ? "Slack" : "Telegram"}*.`;
     }
     if ((action === "mute" || action === "unmute") && value) {
-      const routes = Object.keys((await this.configs.getActive(tenantId))?.config.routes ?? {});
+      const config = (await this.configs.getActive(tenantId))?.config.routes ?? {};
+      const routes = Object.keys(config);
       if (!routes.includes(value)) {
         return `No route \`${value}\`. Routes: ${routes.map((r) => `\`${r}\``).join(", ") || "none"}.`;
+      }
+      if (action === "mute" && config[value]!.mandatory) {
+        return `\`${value}\` is a mandatory route: it cannot be muted.`;
       }
       if (action === "mute") await this.preferences.mute(tenantId, personId, value);
       else await this.preferences.unmute(personId, value);

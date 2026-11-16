@@ -1,5 +1,5 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DB, type Db } from "../src/db/db";
 import { notifications, tenants } from "../src/db/schema";
@@ -211,6 +211,26 @@ describe("POST /v1/notify (integration)", () => {
       const res = await notify({ ...BODY, recipients: ["place:deploys", "place:nowhere"] });
       expect(res.statusCode).toBe(422);
       expect(res.json().places).toEqual(["nowhere"]);
+    });
+
+    it("records the urgency, and refuses more than the route takes", async () => {
+      await activateConfig(app, tenantId, {
+        "routes/e2e-failed.yaml": `${ROUTE}\nurgency: { default: low, max: normal }`,
+      });
+      const stored = async (res: { json(): { notification_id: string } }) =>
+        (
+          await db
+            .select()
+            .from(notifications)
+            .where(eq(notifications.id, res.json().notification_id))
+        )[0]!.urgency;
+
+      expect(await stored(await notify(BODY))).toBe("low");
+      expect(await stored(await notify({ ...BODY, urgency: "normal" }))).toBe("normal");
+      const tooMuch = await notify({ ...BODY, urgency: "high" });
+      expect(tooMuch.statusCode).toBe(422);
+      expect(tooMuch.json().message).toBe('Route "e2e-failed" takes urgency up to normal');
+      expect((await notify({ ...BODY, recipients: ["oncall:sre"] })).statusCode).toBe(422);
     });
 
     it("422 for update without thread_key", async () => {

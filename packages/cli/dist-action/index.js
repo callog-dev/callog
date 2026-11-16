@@ -37833,7 +37833,10 @@ var require_refs = __commonJS({
     }
     var PLACE_REF = new RegExp(`^place:(${SLUG})$`);
     exports2.placeRefSchema = zod_1.z.string().regex(PLACE_REF, "must be a reference like place:\u2026").transform((v) => v);
-    exports2.recipientSchema = zod_1.z.union([refSchema(exports2.REF_KINDS), exports2.placeRefSchema]);
+    var RESERVED_KIND = "oncall:";
+    exports2.recipientSchema = zod_1.z.string().refine((ref) => !ref.startsWith(RESERVED_KIND), {
+      message: `${RESERVED_KIND} recipients are reserved for a later release`
+    }).pipe(zod_1.z.union([refSchema(exports2.REF_KINDS), exports2.placeRefSchema]));
     function placeOf(recipient) {
       return PLACE_REF.exec(recipient)?.[1];
     }
@@ -37861,7 +37864,8 @@ var require_schemas3 = __commonJS({
   "../config-schema/dist/schemas.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.routeSchema = exports2.destinationSchema = exports2.blockSchema = exports2.placesFileSchema = exports2.placeSchema = exports2.teamsFileSchema = exports2.teamSchema = exports2.configFileSchema = exports2.REMOVED_FILES = exports2.REMOVED_KEYS = void 0;
+    exports2.routeSchema = exports2.destinationSchema = exports2.URGENCIES = exports2.blockSchema = exports2.placesFileSchema = exports2.placeSchema = exports2.teamsFileSchema = exports2.teamSchema = exports2.configFileSchema = exports2.REMOVED_FILES = exports2.REMOVED_KEYS = void 0;
+    exports2.isMoreUrgent = isMoreUrgent;
     var zod_1 = require_zod();
     var refs_1 = require_refs();
     exports2.REMOVED_KEYS = {
@@ -37916,6 +37920,11 @@ var require_schemas3 = __commonJS({
     var WINDOW_UNITS = { s: 1, m: 60, h: 3600 };
     var MAX_WINDOW_SECONDS = 24 * 3600;
     var windowSchema = zod_1.z.string().regex(/^[1-9]\d*[smh]$/, "must be a duration like 90s, 15m or 2h").transform((v) => Number(v.slice(0, -1)) * WINDOW_UNITS[v.slice(-1)]).refine((seconds) => seconds <= MAX_WINDOW_SECONDS, { message: "must be at most 24h" });
+    exports2.URGENCIES = ["low", "normal", "high"];
+    var urgencySchema = zod_1.z.enum(exports2.URGENCIES);
+    function isMoreUrgent(urgency, than) {
+      return exports2.URGENCIES.indexOf(urgency) > exports2.URGENCIES.indexOf(than);
+    }
     exports2.destinationSchema = zod_1.z.union([
       ...exports2.placeSchema.options,
       zod_1.z.strictObject({ place: refs_1.slugSchema }),
@@ -37925,12 +37934,14 @@ var require_schemas3 = __commonJS({
     exports2.routeSchema = zod_1.z.strictObject({
       id: refs_1.slugSchema,
       description: zod_1.z.string().optional(),
+      /**
+       * Who may send here with a credential of their own. Left out for a route that only hooks
+       * post to: a hook is bound to its route by an admin.
+       */
       allowed_sources: zod_1.z.strictObject({
         github_repos: zod_1.z.array(zod_1.z.string().regex(/^[\w.-]+\/[\w.-]+$/, "must be owner/repo")).default([]),
         api_keys: zod_1.z.array(zod_1.z.string().min(1)).default([])
-      }).refine((s) => s.github_repos.length + s.api_keys.length > 0, {
-        message: "at least one github_repos or api_keys entry is required"
-      }),
+      }).default({ github_repos: [], api_keys: [] }),
       destinations: zod_1.z.array(exports2.destinationSchema).default([]),
       /**
        * For a route without destinations: where a notification is posted when it reaches
@@ -37949,6 +37960,13 @@ var require_schemas3 = __commonJS({
        * a group stays open for `window` after its first notification.
        */
       group: zod_1.z.strictObject({ key: zod_1.z.string().min(1), window: windowSchema }).optional(),
+      /**
+       * The urgency of the route's notifications: what a sender that names none gets, and the
+       * most a sender may ask for. Recorded with each notification; nothing acts on it yet.
+       */
+      urgency: zod_1.z.strictObject({ default: urgencySchema.default("normal"), max: urgencySchema.default("high") }).default({ default: "normal", max: "high" }),
+      /** People cannot mute a mandatory route: it reaches them and mentions them regardless. */
+      mandatory: zod_1.z.boolean().default(false),
       mentions: zod_1.z.enum(["recipients", "none"]).default("recipients"),
       /**
        * Also send each recipient a personal copy in their preferred channel (Slack or
@@ -37988,6 +38006,8 @@ var require_parse3 = __commonJS({
       allowed_sources: { github_repos: [], api_keys: [] },
       destinations: [],
       recipients: [],
+      urgency: { default: "normal", max: "high" },
+      mandatory: false,
       mentions: "none",
       dm: true,
       schema: {
@@ -38115,6 +38135,9 @@ var require_parse3 = __commonJS({
           errors.push({ file, path: path4, message: `unknown place "${name}" (not defined in places.yaml)` });
         };
         checkDataSchema(route, file, errors);
+        if ((0, schemas_1.isMoreUrgent)(route.urgency.default, route.urgency.max)) {
+          errors.push({ file, path: ["urgency", "default"], message: "must not be above max" });
+        }
         if (route.default_place) {
           checkPlace(["default_place"], route.default_place);
           if (route.destinations.length > 0) {

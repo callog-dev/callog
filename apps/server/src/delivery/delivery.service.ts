@@ -219,7 +219,7 @@ export class DeliveryService {
       }
       // With personal copies, the plan below says who muted the route.
       if (!route.dm) {
-        for (const personId of await this.preferences.mutedAmong([...mentionable], route.id)) {
+        for (const personId of await this.preferences.mutedAmong([...mentionable], route)) {
           notes.push({ recipient: `person:${personId}`, note: "muted" });
         }
       }
@@ -351,8 +351,7 @@ export class DeliveryService {
   /** People who muted the route are not mentioned in it either. */
   private async mentionFor(route: Route, resolution: Resolution): Promise<MentionResolver> {
     const personIds = resolution.refs.flatMap((r) => r.persons.map((p) => p.personId));
-    if (personIds.length === 0) return resolution.mention;
-    const muted = await this.preferences.mutedAmong(personIds, route.id);
+    const muted = await this.preferences.mutedAmong(personIds, route);
     return muted.size > 0 ? resolution.mentionWithout(muted) : resolution.mention;
   }
 

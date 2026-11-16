@@ -6,7 +6,7 @@ import {
   type ConfigTree,
   type ParseResult,
 } from "./parse";
-import { splitRecipients } from "./refs";
+import { recipientSchema, splitRecipients } from "./refs";
 import { loadFixture } from "./test-utils";
 
 const valid = () => loadFixture("valid");
@@ -94,14 +94,14 @@ describe("parseConfigTree", () => {
     expect(errors[0]?.message).toBe('unknown team "constructor" (not defined in teams.yaml)');
   });
 
-  it("requires at least one allowed source", () => {
+  it("takes a route with no senders of its own: only hooks post to it", () => {
     const route = `
 id: a
-allowed_sources: {}
 destinations: [{ slack: "#x" }]
 template: [{ text: hi }]`;
-    const errors = errorsOf(parseConfigTree({ "routes/a.yaml": route }));
-    expect(errors[0]).toMatchObject({ file: "routes/a.yaml", path: ["allowed_sources"] });
+    const result = parseConfigTree({ "routes/a.yaml": route });
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    expect(result.config.routes.a!.allowed_sources).toEqual({ github_repos: [], api_keys: [] });
   });
 
   it("requires a template", () => {
@@ -245,6 +245,29 @@ recipients: ["githb:octocat", "place:nowhere", "github:{{ data.x }}", "team:sre"
     expect(findRoute(config.config, "a")?.id).toBe("a");
     expect(findRoute(config.config, "direct")).toBe(DIRECT_ROUTE);
     expect(findRoute(config.config, "constructor")).toBeUndefined();
+  });
+
+  it("records urgency and mandatory, and keeps oncall: for later", () => {
+    const parse = (extra: string) => parseConfigTree({ "routes/a.yaml": minimalRoute("a", extra) });
+    const plain = parse("");
+    if (!plain.ok) throw new Error(JSON.stringify(plain.errors));
+    expect(plain.config.routes.a).toMatchObject({
+      urgency: { default: "normal", max: "high" },
+      mandatory: false,
+    });
+    const set = parse("urgency: { default: low, max: normal }\nmandatory: true");
+    if (!set.ok) throw new Error(JSON.stringify(set.errors));
+    expect(set.config.routes.a).toMatchObject({
+      urgency: { default: "low", max: "normal" },
+      mandatory: true,
+    });
+    expect(errorsOf(parse("urgency: { default: high, max: low }"))).toEqual([
+      { file: "routes/a.yaml", path: ["urgency", "default"], message: "must not be above max" },
+    ]);
+    expect(recipientSchema.safeParse("oncall:sre").error?.issues[0]?.message).toBe(
+      "oncall: recipients are reserved for a later release",
+    );
+    expect(recipientSchema.safeParse("team:sre").success).toBe(true);
   });
 
   it("reads the grouping window as seconds", () => {

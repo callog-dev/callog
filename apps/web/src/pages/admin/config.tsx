@@ -45,7 +45,7 @@ export function ConfigPage() {
                 : "No valid config yet"}
             </CardTitle>
             <CardDescription>
-              Routes and teams live in{" "}
+              Routes, teams and places live in{" "}
               {repo && (
                 <a
                   className="underline-offset-4 hover:underline"

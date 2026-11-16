@@ -6,6 +6,7 @@ import {
   Get,
   HttpCode,
   Inject,
+  ConflictException,
   NotFoundException,
   Param,
   Post,
@@ -136,11 +137,15 @@ export class ApiController {
     const tenant = (await this.tenants.findById(tenantId))!;
     const { owner, repo } = configRepoOf(tenant);
     const muted = new Set(personId ? (await this.preferences.get(personId)).mutedRoutes : []);
+    // The default place is where a notification goes only when it reaches nobody else.
     const withTargets = routes.map((route) => ({
       route,
       targets: [
         ...routeTargets(route, active.config, this.channels),
-        ...defaultTargets(route, active.config, this.channels),
+        ...defaultTargets(route, active.config, this.channels).map((target) => ({
+          ...target,
+          fallback: true,
+        })),
       ],
     }));
     // Telegram destinations are raw chat ids; show the chat title when the bot can see it.
@@ -158,7 +163,13 @@ export class ApiController {
         return label ? { ...t, label } : t;
       }),
       dm: route.dm,
+      /** People cannot mute it. */
+      mandatory: route.mandatory,
       mentions: route.mentions,
+      /** Seconds a group of repeats stays open, when the route groups them. */
+      groupWindow: route.group?.window ?? null,
+      /** The route names recipients itself, from the notification's data. */
+      addsRecipients: route.recipients.length > 0,
       allowedSources: route.allowed_sources,
       dataFields: Object.keys(
         (route.schema?.properties as Record<string, unknown> | undefined) ?? {},
@@ -192,7 +203,9 @@ export class ApiController {
     const { tenantId } = req.session!;
     const personId = req.session!.personId!;
     const routes = (await this.configs.getActive(tenantId))?.config.routes ?? {};
-    if (!ownValue(routes, routeId)) throw new NotFoundException(`Route "${routeId}" not found`);
+    const route = ownValue(routes, routeId);
+    if (!route) throw new NotFoundException(`Route "${routeId}" not found`);
+    if (route.mandatory) throw new ConflictException(`Route "${routeId}" cannot be muted`);
     await this.preferences.mute(tenantId, personId, routeId);
     return this.preferences.get(personId);
   }

@@ -151,6 +151,21 @@ describe("personal copies and preferences (integration)", () => {
     expect(await deliver("r", ["github:bob"])).toContain("slack dm:UB sent");
   });
 
+  it("does not let a mandatory route be muted", async () => {
+    await notify("prefs mute r", "UB");
+    versionId = (
+      await activateConfig(app, tenantId, {
+        "teams.yaml": "teams:\n  fe: { slack_channel: '#fe', members_from: { github_team: fe } }",
+        "routes/r.yaml": `${route("r", true)}\nmandatory: true`,
+      })
+    ).id;
+
+    // A mute from before the route became mandatory no longer holds.
+    expect(await deliver("r", ["github:bob"])).toEqual(["slack #alerts sent", "slack dm:UB sent"]);
+    expect(slack.posted.find((p) => p.channel === "C0ALERTS1")!.message.text).toContain("<@UB>");
+    expect(await notify("prefs mute r", "UA")).toContain("cannot be muted");
+  });
+
   it("keeps personal copies of one thread in one DM thread", async () => {
     await deliver("r", ["github:bob"], "t1");
     await deliver("r", ["github:bob"], "t1");

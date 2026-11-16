@@ -127,6 +127,13 @@
       "when": 1794766043987,
       "tag": "0017_notification_trace",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794804600788,
+      "tag": "0018_notification_urgency",
+      "breakpoints": true
     }
   ]
 }

@@ -91,6 +91,15 @@ const windowSchema = z
   .transform((v) => Number(v.slice(0, -1)) * WINDOW_UNITS[v.slice(-1) as keyof typeof WINDOW_UNITS])
   .refine((seconds) => seconds <= MAX_WINDOW_SECONDS, { message: "must be at most 24h" });
 
+/** How much a notification may interrupt, least first. */
+export const URGENCIES = ["low", "normal", "high"] as const;
+export type Urgency = (typeof URGENCIES)[number];
+const urgencySchema = z.enum(URGENCIES);
+
+export function isMoreUrgent(urgency: Urgency, than: Urgency): boolean {
+  return URGENCIES.indexOf(urgency) > URGENCIES.indexOf(than);
+}
+
 export const destinationSchema = z.union([
   ...placeSchema.options,
   z.strictObject({ place: slugSchema }),
@@ -104,6 +113,10 @@ const recipientRefSchema = refSchema(["email", "github", "slack", "telegram", "t
 export const routeSchema = z.strictObject({
   id: slugSchema,
   description: z.string().optional(),
+  /**
+   * Who may send here with a credential of their own. Left out for a route that only hooks
+   * post to: a hook is bound to its route by an admin.
+   */
   allowed_sources: z
     .strictObject({
       github_repos: z
@@ -111,9 +124,7 @@ export const routeSchema = z.strictObject({
         .default([]),
       api_keys: z.array(z.string().min(1)).default([]),
     })
-    .refine((s) => s.github_repos.length + s.api_keys.length > 0, {
-      message: "at least one github_repos or api_keys entry is required",
-    }),
+    .default({ github_repos: [], api_keys: [] }),
   destinations: z.array(destinationSchema).default([]),
   /**
    * For a route without destinations: where a notification is posted when it reaches
@@ -132,6 +143,15 @@ export const routeSchema = z.strictObject({
    * a group stays open for `window` after its first notification.
    */
   group: z.strictObject({ key: z.string().min(1), window: windowSchema }).optional(),
+  /**
+   * The urgency of the route's notifications: what a sender that names none gets, and the
+   * most a sender may ask for. Recorded with each notification; nothing acts on it yet.
+   */
+  urgency: z
+    .strictObject({ default: urgencySchema.default("normal"), max: urgencySchema.default("high") })
+    .default({ default: "normal", max: "high" }),
+  /** People cannot mute a mandatory route: it reaches them and mentions them regardless. */
+  mandatory: z.boolean().default(false),
   mentions: z.enum(["recipients", "none"]).default("recipients"),
   /**
    * Also send each recipient a personal copy in their preferred channel (Slack or

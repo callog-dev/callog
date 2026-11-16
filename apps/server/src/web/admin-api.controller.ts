@@ -328,6 +328,7 @@ export class AdminApiController {
       recipients: n.recipients,
       threadKey: n.threadKey,
       update: n.update,
+      urgency: n.urgency,
       createdAt: n.createdAt,
       ...(await this.trace.of(n)),
     };

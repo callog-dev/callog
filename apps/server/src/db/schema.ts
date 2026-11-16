@@ -1,4 +1,4 @@
-import type { Ref } from "@callog/config-schema";
+import { URGENCIES, type Ref } from "@callog/config-schema";
 import { sql } from "drizzle-orm";
 import {
   bigint,
@@ -190,6 +190,8 @@ export const notifications = pgTable(
     update: boolean("update").notNull().default(false),
     /** What the route's `group.key` rendered to; repeats within the window share a thread. */
     groupKey: text("group_key"),
+    /** How much the notification may interrupt. Recorded; nothing acts on it yet. */
+    urgency: text("urgency", { enum: URGENCIES }).notNull().default("normal"),
     /** Written once, when the deliveries are planned. */
     trace: jsonb("trace").$type<TraceNote[]>().notNull().default([]),
     status: text("status", {

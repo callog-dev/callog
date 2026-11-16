@@ -3,7 +3,7 @@ import {
   UnprocessableEntityException,
   type RawBodyRequest,
 } from "@nestjs/common";
-import { recipientSchema, slugSchema } from "@callog/config-schema";
+import { recipientSchema, slugSchema, URGENCIES } from "@callog/config-schema";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 
@@ -45,6 +45,8 @@ export const notifyRequestSchema = z
         message: `must not start with "${GROUP_THREAD_PREFIX}"`,
       })
       .optional(),
+    /** How much it may interrupt; the route sets the default and the most a sender may ask. */
+    urgency: z.enum(URGENCIES).optional(),
     /** Edit the thread's first message instead of posting a new one. */
     update: z.boolean().default(false),
   })

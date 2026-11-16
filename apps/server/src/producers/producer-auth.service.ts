@@ -23,6 +23,13 @@ export interface Producer {
   direct?: boolean;
 }
 
+/** The credential of an `Authorization: Bearer …` header; 401 without one. */
+export function bearerToken(authorization: string | undefined): string {
+  const token = /^Bearer\s+(\S+)$/i.exec(authorization ?? "")?.[1];
+  if (!token) throw new UnauthorizedException("Missing bearer token");
+  return token;
+}
+
 /** Authenticates producers (GitHub Actions OIDC or API key) and checks route access. */
 @Injectable()
 export class ProducerAuthService {
@@ -38,8 +45,7 @@ export class ProducerAuthService {
 
   /** 401 for anything that is not a valid credential of an active tenant. */
   async authenticate(authorization: string | undefined): Promise<Producer> {
-    const token = /^Bearer\s+(\S+)$/i.exec(authorization ?? "")?.[1];
-    if (!token) throw new UnauthorizedException("Missing bearer token");
+    const token = bearerToken(authorization);
     return token.split(".").length === 3 ? this.fromOidc(token) : this.fromApiKey(token);
   }
 

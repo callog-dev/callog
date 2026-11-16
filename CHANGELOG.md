@@ -13,9 +13,17 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 - Places: `places.yaml` gives rooms a name (`deploys: { slack: "#deploys" }`). A route delivers
   to `place: <name>`, and a sender can add `place:<name>` to `recipients` to post there too —
   without knowing which messenger or channel is behind the name.
-- Hooks: an admin binds a secret URL (`POST /v1/hooks/<token>`) to one route. Any JSON object
-  posted there becomes the notification's `data` — for systems that cannot sign a request or
-  set a header. The token is shown once; a hook is revoked by name.
+- Hooks: an admin binds a token to one route, and any JSON object posted with it becomes the
+  notification's `data`. A sender that can set a header posts to `/v1/hooks` with
+  `Authorization: Bearer <token>`; one that cannot posts to `/v1/hooks/<token>`. The token is
+  shown once; a hook is revoked by name. A route only hooks post to needs no
+  `allowed_sources`.
+- Presets: ready-made routes for systems that send their own webhooks, in
+  `templates/presets`. The first one is for Grafana Alerting.
+- `mandatory: true` on a route: people cannot mute it, and a mute they set earlier does not
+  hold.
+- `urgency` on a notification (`low`, `normal`, `high`) and on a route (`default` and `max`).
+  It is recorded and checked against the route, and nothing acts on it yet.
 - A route can add recipients on its own with `recipients`: Liquid templates over `data` that
   render to people, teams or places (`github:{{ data.commit.author }}`). What does not render
   to a recipient is left out, so a webhook payload never fails the request.
@@ -40,6 +48,8 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
   notification joined a group. `GET /v1/notifications/<id>` tells a sender which of the
   recipients it named led nowhere and which delivery took over a failed one — nothing about
   the people themselves.
+- In the web UI: a route's page says when a place is only its fallback, when the route adds
+  recipients from the data, and when it groups repeats.
 - In the web UI: a notification's page traces its deliveries — whom each is for, what took
   over a refused one, who was left out and why; Settings → Hooks creates and revokes hooks;
   Places lists the rooms behind each name with the routes that use them; an API key can be
@@ -64,6 +74,7 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
   `deliveries`; they run on
   start unless `MIGRATE_ON_START=false`.
 - `direct` is now a reserved route id: rename a route of yours that has it.
+- Recipients that start with `oncall:` are refused: the prefix is kept for a later release.
 - `thread_key` values that start with `group:` are refused: those threads belong to grouping.
 - A hook's token is part of its URL. Keep request paths under `/v1/hooks/` out of access logs
   of the proxy in front of Callog, and make that path reachable from the systems that send.

@@ -10,6 +10,7 @@ import {
 import {
   DIRECT_ROUTE,
   findRoute,
+  isMoreUrgent,
   ownValue,
   parseRef,
   placeOf,
@@ -99,6 +100,13 @@ export class NotificationsService {
       });
     }
 
+    const urgency = request.urgency ?? route.urgency.default;
+    if (isMoreUrgent(urgency, route.urgency.max)) {
+      throw new UnprocessableEntityException(
+        `Route "${route.id}" takes urgency up to ${route.urgency.max}`,
+      );
+    }
+
     if (route.schema) {
       const issues = this.dataValidator.validate(
         `${active.versionId}:${route.id}`,
@@ -144,6 +152,7 @@ export class NotificationsService {
             source: producer.source,
             data: request.data,
             recipients,
+            urgency,
             ...thread,
           })
           .returning({ id: notifications.id });
@@ -191,6 +200,7 @@ export class NotificationsService {
       route: notification.routeId,
       status: notification.status,
       thread_key: notification.threadKey,
+      urgency: notification.urgency,
       created_at: notification.createdAt,
       group: trace.group,
       /**

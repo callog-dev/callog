@@ -29,8 +29,16 @@ export const placeRefSchema = z
   .regex(PLACE_REF, "must be a reference like place:…")
   .transform((v) => v as PlaceRef);
 
+/** Kept for whoever is on call: not a recipient yet, and not to be taken by anything else. */
+const RESERVED_KIND = "oncall:";
+
 /** Whom a notification is for: a person, a team or a place. */
-export const recipientSchema = z.union([refSchema(REF_KINDS), placeRefSchema]);
+export const recipientSchema = z
+  .string()
+  .refine((ref) => !ref.startsWith(RESERVED_KIND), {
+    message: `${RESERVED_KIND} recipients are reserved for a later release`,
+  })
+  .pipe(z.union([refSchema(REF_KINDS), placeRefSchema]));
 
 /** The place a recipient names, or `undefined` when it is a person or a team. */
 export function placeOf(recipient: string): string | undefined {
