@@ -22,6 +22,8 @@ import {
   type GithubOAuthClient,
 } from "../identity/github-oauth";
 import { SETUP_PATH } from "../setup/github-app-manifest";
+import { SlackConnectionsService } from "../slack/slack-connections.service";
+import { TenantsService } from "../tenants/tenants.service";
 import { AdminCheck } from "./admin-check";
 import { clearCookie, cookie, readCookie } from "./cookies";
 import { escapeHtml, htmlDocument } from "./html";
@@ -57,6 +59,8 @@ export class GithubOAuthController {
     private readonly sessions: SessionsService,
     @Inject(GITHUB_APP_CONFIG) private readonly app: GithubAppConfig | undefined,
     private readonly adminCheck: AdminCheck,
+    private readonly tenants: TenantsService,
+    private readonly slack: SlackConnectionsService,
   ) {}
 
   @Get("auth/github/login")
@@ -99,6 +103,30 @@ export class GithubOAuthController {
     );
   }
 
+  /**
+   * Why a GitHub user got no session. "Link your account in Slack" is the answer only once
+   * Slack is connected; before that the one way in is an organization owner.
+   */
+  private async noSession(login: string): Promise<string> {
+    const tenants = await this.tenants.listActive();
+    if (tenants.length === 0) {
+      return (
+        "Callog is not connected to a GitHub organization yet. Install its GitHub App on the " +
+        "organization, then sign in as one of the organization's owners."
+      );
+    }
+    const [connections, gaps] = await Promise.all([
+      Promise.all(tenants.map((tenant) => this.slack.find(tenant.id))),
+      this.adminCheck.missingAccess(tenants),
+    ]);
+    const why = connections.some(Boolean)
+      ? `GitHub @${login} is not linked to anyone here yet. Run /notify link github in Slack, then sign in again.`
+      : `Callog is not set up yet, and GitHub @${login} is not an owner of the organization. ` +
+        "An owner of the GitHub organization signs in first and connects Slack. After that, " +
+        "run /notify link github in Slack or ask an admin to link your account.";
+    return gaps ? `${why} Organization owners cannot be recognized: ${describeGaps(gaps)}.` : why;
+  }
+
   @Get("oauth/github/callback")
   @Header("cache-control", "no-store")
   @Header("content-security-policy", PAGE_CSP)
@@ -139,15 +167,7 @@ export class GithubOAuthController {
         : ownerTenant
           ? { tenantId: ownerTenant, personId: null, githubLogin: user.login }
           : undefined;
-      if (!session) {
-        const gaps = await this.adminCheck.missingAccess();
-        return page(
-          `GitHub @${user.login} is not linked to anyone here yet. Run /notify link github in Slack, then sign in again.` +
-            (gaps
-              ? ` Organization owners cannot be recognized either: ${describeGaps(gaps)}.`
-              : ""),
-        );
-      }
+      if (!session) return page(await this.noSession(user.login));
       const token = await this.sessions.create(session);
       reply
         .header("set-cookie", [

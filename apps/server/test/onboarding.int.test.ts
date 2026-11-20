@@ -71,7 +71,7 @@ describe("first sign-in and the Getting started checklist (integration)", () => 
   it("keeps an unlinked member out", async () => {
     await expect(
       webLogin(app, githubOAuthUsers, { id: 6000 + seq, login: `member-${seq}` }),
-    ).rejects.toThrow(/not linked to anyone here yet/);
+    ).rejects.toThrow(/Callog is not set up yet/);
   });
 
   it("records the owner's login as the actor of role changes", async () => {

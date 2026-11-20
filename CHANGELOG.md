@@ -14,6 +14,9 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
   _Contents_, _Metadata_, _Members_: read; events _Push_, _Organization_). What is missing is
   named in the server log at startup, on the Overview and Integrations pages, and on the page
   of a sign-in that failed because organization owners could not be recognized.
+- A sign-in that gets no session says why: the App is not installed on an organization, or
+  Slack is not connected yet and only an organization owner can sign in. It no longer sends
+  people to a Slack command that does not exist yet.
 - The "sign-in is not configured" page names the variables that are not set and says that the
   client ID and client secret belong to the same GitHub App.
 

@@ -33,8 +33,10 @@ export class AdminCheck {
    * What the App lacks on some organization. Without `members` nobody is seen as an owner,
    * so a failed sign-in is the only place to say it.
    */
-  async missingAccess(): Promise<AccessGaps | null> {
-    for (const tenant of await this.tenants.listActive()) {
+  async missingAccess(
+    tenants: { githubInstallationId: number | null }[],
+  ): Promise<AccessGaps | null> {
+    for (const tenant of tenants) {
       const gaps = await this.access.gaps(tenant.githubInstallationId);
       if (gaps) return gaps;
     }

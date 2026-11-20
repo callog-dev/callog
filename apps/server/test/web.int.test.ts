@@ -8,8 +8,10 @@ import { DB, type Db } from "../src/db/db";
 import { persons, tenants } from "../src/db/schema";
 import { AppAccessService } from "../src/github/app-access.service";
 import { PeopleService } from "../src/identity/people.service";
+import { SlackConnectionsService } from "../src/slack/slack-connections.service";
 import { TelegramConnectionsService } from "../src/telegram/telegram-connections.service";
 import type { FakeGithub } from "./setup/fake-github";
+import { GOOD_SLACK_TOKEN } from "./setup/fake-slack";
 import { GOOD_TELEGRAM_TOKEN, type FakeTelegram } from "./setup/fake-telegram";
 import { cookiesOf } from "./setup/web-login";
 import { createTestApp, createTenant, activateConfig } from "./setup/test-app";
@@ -159,9 +161,23 @@ describe("web UI backend (integration)", () => {
     });
 
     it("explains how to link an unknown GitHub account", async () => {
+      await app.get(SlackConnectionsService).connect(tenantId, GOOD_SLACK_TOKEN);
       const { callback } = await login({ id: 999, login: "stranger" });
       expect(callback.body).toContain("not linked to anyone here yet");
       expect(callback.body).not.toContain("GitHub App is missing");
+    });
+
+    it("sends everyone but an owner away until Slack is connected", async () => {
+      const { callback } = await login({ id: 999, login: "stranger" });
+      expect(callback.body).toContain("Callog is not set up yet");
+      expect(callback.body).toContain("An owner of the GitHub organization signs in first");
+      expect(callback.body).toContain("ask an admin to link your account");
+    });
+
+    it("says when the App is not installed on any organization", async () => {
+      await db.delete(tenants);
+      const { callback } = await login({ id: 999, login: "stranger" });
+      expect(callback.body).toContain("not connected to a GitHub organization yet");
     });
 
     it("says what the App lacks when it cannot tell who owns the organization", async () => {
@@ -185,7 +201,7 @@ describe("web UI backend (integration)", () => {
       await db.update(tenants).set({ status: "inactive" }).where(eq(tenants.id, tenantId));
       expect((await get("/api/me", cookie)).statusCode).toBe(401);
       const { callback } = await login({ id: 11, login: "alice-gh" });
-      expect(callback.body).toContain("not linked to anyone here yet");
+      expect(callback.body).toContain("not connected to a GitHub organization yet");
     });
 
     it("ends the session on logout and for deactivated people", async () => {
