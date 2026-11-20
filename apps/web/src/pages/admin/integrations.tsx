@@ -5,12 +5,13 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
 import { GithubIcon } from "@/components/github-icon";
 import { ErrorState } from "@/components/states";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { adminApi, type AdminStatus } from "@/lib/api";
+import { adminApi, describeGithubGaps, type AdminStatus } from "@/lib/api";
 import { ago } from "@/lib/time";
 import {
   SlackConnectDialog,
@@ -91,6 +92,15 @@ function GithubCard({ status }: { status: AdminStatus }) {
         )
       }
     >
+      {status.github && (
+        <Alert variant="destructive">
+          <AlertTitle>The App is missing {describeGithubGaps(status.github)}</AlertTitle>
+          <AlertDescription>
+            Add them in the App&apos;s settings (Permissions &amp; events); an organization owner
+            then accepts the new permissions.
+          </AlertDescription>
+        </Alert>
+      )}
       <dl className="grid grid-cols-[8rem_1fr] gap-y-1">
         <dt className="text-muted-foreground">Config repo</dt>
         <dd>

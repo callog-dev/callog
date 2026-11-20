@@ -1,3 +1,4 @@
+import { APP_EVENTS, APP_PERMISSIONS } from "../github/app-access";
 import { GITHUB_WEBHOOK_PATH } from "../github/github-webhook.controller";
 
 export const SETUP_PATH = "/setup/github-app";
@@ -76,8 +77,8 @@ export function buildManifest(options: { publicUrl: string; webhookUrl: string; 
     redirect_url: `${base}${SETUP_CALLBACK_PATH}`,
     callback_urls: [`${base}/oauth/github/callback`],
     public: false,
-    default_permissions: { contents: "read", metadata: "read", members: "read" },
-    default_events: ["push", "organization"],
+    default_permissions: APP_PERMISSIONS,
+    default_events: [...APP_EVENTS],
   };
 }
 

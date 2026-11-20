@@ -46,14 +46,23 @@ export function createGithubOAuthClient(env: Env): GithubOAuthClient {
   };
 }
 
+const SIGN_IN_VARIABLES = [
+  "GITHUB_APP_CLIENT_ID",
+  "GITHUB_APP_CLIENT_SECRET",
+  "PUBLIC_URL",
+] as const;
+
 @Injectable()
 export class GithubOAuthConfig {
   constructor(@Inject(ENV) private readonly env: Env) {}
 
+  /** The variables sign-in needs that are not set. */
+  get missing(): string[] {
+    return SIGN_IN_VARIABLES.filter((name) => !this.env[name]);
+  }
+
   get enabled(): boolean {
-    return Boolean(
-      this.env.GITHUB_APP_CLIENT_ID && this.env.GITHUB_APP_CLIENT_SECRET && this.env.PUBLIC_URL,
-    );
+    return this.missing.length === 0;
   }
 
   /** GitHub's consent page; `state` is a one-time link token or a web login state. */

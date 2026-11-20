@@ -177,6 +177,10 @@ organization → Settings → Developer settings → GitHub Apps → New GitHub 
   _Members: read_. Events: _Push_, _Organization_.
 - Where it can be installed: only this account.
 
+The server compares the installation with this list and names what is missing: in its log at
+startup and, for an admin, on the Overview and Integrations pages. After adding a permission to
+an existing App, an organization owner has to accept it (GitHub emails them a request).
+
 Then generate a private key and a client secret, install the App on the organization and fill
 in `.env`:
 

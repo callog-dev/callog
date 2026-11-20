@@ -1,6 +1,7 @@
+import { Logger } from "@nestjs/common";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DB, type Db } from "../src/db/db";
 import { tenants } from "../src/db/schema";
 import { InstallationEvents } from "../src/tenants/installation-events";
@@ -122,5 +123,31 @@ describe("GitHub webhooks (integration)", () => {
     expect(await tenantFor(2)).toMatchObject({ status: "active", githubOrgLogin: "renamed-org" });
     expect(await tenantFor(3)).toMatchObject({ status: "active", githubOrgLogin: "new-org" });
     expect(await tenantFor(4)).toBeUndefined();
+  });
+
+  it("warns when an installation lacks a permission or an event", async () => {
+    const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+    const granted = fakeGithub.access;
+    fakeGithub.access = { permissions: { metadata: "read" }, events: ["push"] };
+    fakeGithub.installations = [
+      {
+        id: 2,
+        accountId: 900,
+        accountLogin: "renamed-org",
+        accountType: "Organization",
+        suspended: false,
+      },
+    ];
+    try {
+      await app.get(InstallationEvents).reconcile();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /^Installation on renamed-org: the GitHub App is missing permissions \(read\): contents, members; events: organization\./,
+        ),
+      );
+    } finally {
+      fakeGithub.access = granted;
+      warn.mockRestore();
+    }
   });
 });

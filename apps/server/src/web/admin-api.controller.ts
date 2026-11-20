@@ -29,6 +29,8 @@ import {
   unmappedRecipients,
   USABLE_CONFIDENCE,
 } from "../db/schema";
+import type { AccessGaps } from "../github/app-access";
+import { AppAccessService } from "../github/app-access.service";
 import { GithubAppService } from "../github/github-app.service";
 import { PeopleService } from "../identity/people.service";
 import { AuditService } from "../audit/audit.service";
@@ -72,7 +74,8 @@ type AttentionItem =
   | { kind: "config_rejected"; versionId: string; errors: number }
   | { kind: "no_config" | "slack_missing" }
   | { kind: "failed" | "partially_failed" | "unmapped" | "suggested"; count: number }
-  | { kind: "sync_stale"; lastSyncedAt: string | null };
+  | { kind: "sync_stale"; lastSyncedAt: string | null }
+  | ({ kind: "github_access" } & AccessGaps);
 const MAINTENANCE = { sync: "maintenance.sync", retention: "maintenance.retention" } as const;
 const TEST_TEXT = "Callog is connected: this is a test message from the admin UI.";
 const slackTestBody = z.object({ channel: z.string().trim().min(1) });
@@ -160,6 +163,7 @@ export class AdminApiController {
     private readonly telegram: TelegramConnectionsService,
     private readonly telegramChats: TelegramChatsService,
     private readonly githubApp: GithubAppService,
+    private readonly appAccess: AppAccessService,
     private readonly admins: TenantAdminsService,
     private readonly adminCheck: AdminCheck,
     private readonly resolver: RecipientResolver,
@@ -798,35 +802,40 @@ export class AdminApiController {
   @Get("attention")
   async attention(@Req() req: SessionRequest) {
     const { tenantId } = req.session!;
-    const [active, latest, slack, counts, [unmapped], [suggested], [people]] = await Promise.all([
-      this.configs.getActive(tenantId),
-      this.configs.latest(tenantId),
-      this.slack.find(tenantId),
-      this.db
-        .select({ status: notifications.status, count: sql<number>`count(*)::int` })
-        .from(notifications)
-        .where(
-          and(
-            eq(notifications.tenantId, tenantId),
-            sql`${notifications.createdAt} > now() - interval '24 hours'`,
-          ),
-        )
-        .groupBy(notifications.status),
-      this.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(unmappedRecipients)
-        .where(eq(unmappedRecipients.tenantId, tenantId)),
-      this.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(identities)
-        .where(and(eq(identities.tenantId, tenantId), eq(identities.confidence, "suggested"))),
-      this.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(persons)
-        .where(and(eq(persons.tenantId, tenantId), eq(persons.status, "active"))),
-    ]);
+    const [active, latest, slack, counts, [unmapped], [suggested], [people], github] =
+      await Promise.all([
+        this.configs.getActive(tenantId),
+        this.configs.latest(tenantId),
+        this.slack.find(tenantId),
+        this.db
+          .select({ status: notifications.status, count: sql<number>`count(*)::int` })
+          .from(notifications)
+          .where(
+            and(
+              eq(notifications.tenantId, tenantId),
+              sql`${notifications.createdAt} > now() - interval '24 hours'`,
+            ),
+          )
+          .groupBy(notifications.status),
+        this.db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(unmappedRecipients)
+          .where(eq(unmappedRecipients.tenantId, tenantId)),
+        this.db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(identities)
+          .where(and(eq(identities.tenantId, tenantId), eq(identities.confidence, "suggested"))),
+        this.db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(persons)
+          .where(and(eq(persons.tenantId, tenantId), eq(persons.status, "active"))),
+        this.tenants
+          .findById(tenantId)
+          .then((tenant) => this.appAccess.gaps(tenant?.githubInstallationId)),
+      ]);
     const last24h = Object.fromEntries(counts.map((c) => [c.status, c.count]));
     const items: AttentionItem[] = [];
+    if (github) items.push({ kind: "github_access", ...github });
     if (latest?.status === "invalid") {
       items.push({
         kind: "config_rejected",
@@ -862,7 +871,8 @@ export class AdminApiController {
     const { tenantId } = req.session!;
     const tenant = (await this.tenants.findById(tenantId))!;
     const { owner, repo } = configRepoOf(tenant);
-    const [active, latest, slack, telegram] = await Promise.all([
+    const [github, active, latest, slack, telegram] = await Promise.all([
+      this.appAccess.gaps(tenant.githubInstallationId),
       this.configs.getActive(tenantId),
       this.configs.latest(tenantId),
       this.slack.find(tenantId),
@@ -873,6 +883,7 @@ export class AdminApiController {
       org: tenant.githubOrgLogin,
       installationId: tenant.githubInstallationId,
       configRepo: `${owner}/${repo}`,
+      github,
       config: {
         active: active
           ? { commitSha: active.commitSha, routes: Object.keys(active.config.routes).length }

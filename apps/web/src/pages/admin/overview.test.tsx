@@ -15,6 +15,7 @@ describe("OverviewTab", () => {
           items: [
             { kind: "config_rejected", versionId: "v1", errors: 2 },
             { kind: "failed", count: 1 },
+            { kind: "github_access", permissions: ["members"], events: [] },
           ],
           counters,
         }),
@@ -29,6 +30,9 @@ describe("OverviewTab", () => {
       "href",
       "/manage/deliveries?status=failed&period=24h",
     );
+    expect(
+      screen.getByRole("link", { name: /GitHub App is missing permissions \(read\): members\./ }),
+    ).toHaveAttribute("href", "/manage/integrations");
   });
 
   it("says when nothing needs attention", async () => {

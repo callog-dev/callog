@@ -1,3 +1,4 @@
+import { APP_EVENTS, APP_PERMISSIONS, type AppAccess } from "../../src/github/app-access";
 import type { InstallationInfo } from "../../src/github/github-app.service";
 
 interface RepoState {
@@ -29,7 +30,9 @@ export class FakeGithub {
   down = false;
   /** When set, the next git tree request waits for it (to interleave config loads). */
   treeGate: Promise<void> | undefined;
-  installations: InstallationInfo[] = [];
+  installations: Omit<InstallationInfo, "access">[] = [];
+  /** What every installation grants; a full grant unless a test narrows it. */
+  access: AppAccess = { permissions: { ...APP_PERMISSIONS }, events: [...APP_EVENTS] };
   repos = new Map<string, RepoState>();
   requests: string[] = [];
   /** Org members (any org). */
@@ -55,8 +58,13 @@ export class FakeGithub {
     return head;
   }
 
-  async listInstallations() {
-    return this.installations;
+  async listInstallations(): Promise<InstallationInfo[]> {
+    return this.installations.map((i) => ({ ...i, access: this.access }));
+  }
+
+  async installationAccess(_installationId: number): Promise<AppAccess> {
+    if (this.down) throw new HttpError(502);
+    return this.access;
   }
 
   async installationOctokit(_installationId: number) {

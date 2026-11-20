@@ -3,8 +3,10 @@ import path from "node:path";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ENV, type Env } from "../src/config/env";
 import { DB, type Db } from "../src/db/db";
 import { persons, tenants } from "../src/db/schema";
+import { AppAccessService } from "../src/github/app-access.service";
 import { PeopleService } from "../src/identity/people.service";
 import { TelegramConnectionsService } from "../src/telegram/telegram-connections.service";
 import type { FakeGithub } from "./setup/fake-github";
@@ -121,6 +123,21 @@ describe("web UI backend (integration)", () => {
       expect(setCookie).toContain("Secure");
     });
 
+    it("names the variables sign-in is missing", async () => {
+      const env = app.get<Env>(ENV);
+      const secret = env.GITHUB_APP_CLIENT_SECRET;
+      delete env.GITHUB_APP_CLIENT_SECRET;
+      try {
+        const res = await app.inject({ method: "GET", url: "/auth/github/login" });
+        expect(res.statusCode).toBe(503);
+        expect(res.body).toContain("GITHUB_APP_CLIENT_SECRET is not set");
+        expect(res.body).not.toContain("GITHUB_APP_CLIENT_ID");
+        expect(res.body).toContain("a separate OAuth App is not needed");
+      } finally {
+        env.GITHUB_APP_CLIENT_SECRET = secret;
+      }
+    });
+
     it("signs in a linked GitHub user and redirects to the app", async () => {
       const { callback, cookie } = await login({ id: 11, login: "Alice-GH" });
       expect(callback.statusCode).toBe(302);
@@ -144,6 +161,23 @@ describe("web UI backend (integration)", () => {
     it("explains how to link an unknown GitHub account", async () => {
       const { callback } = await login({ id: 999, login: "stranger" });
       expect(callback.body).toContain("not linked to anyone here yet");
+      expect(callback.body).not.toContain("GitHub App is missing");
+    });
+
+    it("says what the App lacks when it cannot tell who owns the organization", async () => {
+      const access = app.get(AppAccessService);
+      const granted = github.access;
+      github.access = { permissions: { contents: "read", metadata: "read" }, events: [] };
+      access.forget();
+      try {
+        const { callback } = await login({ id: 999, login: "stranger" });
+        expect(callback.body).toContain(
+          "the GitHub App is missing permissions (read): members; events: push, organization.",
+        );
+      } finally {
+        github.access = granted;
+        access.forget();
+      }
     });
 
     it("ends sessions and refuses logins of a tenant whose app was uninstalled", async () => {

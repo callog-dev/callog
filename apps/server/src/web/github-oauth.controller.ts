@@ -13,6 +13,7 @@ import {
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { randomBytes } from "node:crypto";
 import { safeEqual } from "../crypto/digest";
+import { describeGaps } from "../github/app-access";
 import { GITHUB_APP_CONFIG, type GithubAppConfig } from "../github/github.config";
 import { AccountLinkingService } from "../identity/account-linking.service";
 import {
@@ -69,7 +70,7 @@ export class GithubOAuthController {
       reply
         .status(503)
         .header("content-type", "text/html; charset=utf-8")
-        .send(page("GitHub login is not configured on this server."));
+        .send(page(this.notConfigured()));
       return;
     }
     const state = `${LOGIN_STATE_PREFIX}${randomBytes(24).toString("base64url")}`;
@@ -84,6 +85,20 @@ export class GithubOAuthController {
       .redirect(this.config.authorizeUrl(state), 302);
   }
 
+  /** Names what the operator has to set: the page is what they see after a deploy. */
+  private notConfigured(): string {
+    const missing = this.config.missing;
+    const fromApp = missing.some((name) => name.startsWith("GITHUB_APP_CLIENT_"));
+    return (
+      `GitHub sign-in is not configured on this server: ${missing.join(", ")} ` +
+      `${missing.length === 1 ? "is" : "are"} not set.` +
+      (fromApp
+        ? " The client ID and a client secret come from the same GitHub App the server already" +
+          " uses (its settings page, General); a separate OAuth App is not needed."
+        : "")
+    );
+  }
+
   @Get("oauth/github/callback")
   @Header("cache-control", "no-store")
   @Header("content-security-policy", PAGE_CSP)
@@ -94,7 +109,7 @@ export class GithubOAuthController {
     @Query("state") state?: string,
   ): Promise<string | void> {
     reply.header("content-type", "text/html; charset=utf-8");
-    if (!this.config.enabled) return page("GitHub sign-in is not configured on this server.");
+    if (!this.config.enabled) return page(this.notConfigured());
     if (!code || !state)
       return page("The link is incomplete. Run /notify link github in Slack again.");
 
@@ -125,8 +140,12 @@ export class GithubOAuthController {
           ? { tenantId: ownerTenant, personId: null, githubLogin: user.login }
           : undefined;
       if (!session) {
+        const gaps = await this.adminCheck.missingAccess();
         return page(
-          `GitHub @${user.login} is not linked to anyone here yet. Run /notify link github in Slack, then sign in again.`,
+          `GitHub @${user.login} is not linked to anyone here yet. Run /notify link github in Slack, then sign in again.` +
+            (gaps
+              ? ` Organization owners cannot be recognized either: ${describeGaps(gaps)}.`
+              : ""),
         );
       }
       const token = await this.sessions.create(session);

@@ -6,6 +6,21 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
+## [Unreleased]
+
+### Added
+
+- A GitHub App registered by hand is checked against what the server needs (permissions
+  _Contents_, _Metadata_, _Members_: read; events _Push_, _Organization_). What is missing is
+  named in the server log at startup, on the Overview and Integrations pages, and on the page
+  of a sign-in that failed because organization owners could not be recognized.
+- The "sign-in is not configured" page names the variables that are not set and says that the
+  client ID and client secret belong to the same GitHub App.
+
+### Operator actions
+
+None.
+
 ## [0.5.0]
 
 ### Added
