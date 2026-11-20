@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: npm test
-      - uses: callog-dev/callog/packages/action@v0.5.0
+      - uses: callog-dev/callog/packages/action@v0.5.1
         if: failure()
         with:
           url: https://notify.company.internal
@@ -40,7 +40,7 @@ message, places a post. It takes only an API key created with _Direct messages_ 
 keys), not the workflow's OIDC token:
 
 ```yaml
-- uses: callog-dev/callog/packages/action@v0.5.0
+- uses: callog-dev/callog/packages/action@v0.5.1
   with:
     url: https://notify.company.internal
     route: direct
