@@ -11,6 +11,7 @@ const status = (overrides: object = {}) => ({
   installationId: 1,
   org: "acme",
   configRepo: "acme/notify-config",
+  github: null,
   config: { active: null, latest: null },
   slack: { team: "Acme", commands: true, lastSyncedAt: null },
   telegram: null,
@@ -37,6 +38,18 @@ describe("IntegrationsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(disconnected).toBe(1));
+  });
+
+  it("names what the GitHub App is missing", async () => {
+    server.use(
+      http.get("*/api/admin/status", () =>
+        HttpResponse.json(status({ github: { permissions: ["members"], events: ["push"] } })),
+      ),
+    );
+    renderPage(<IntegrationsPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "missing permissions (read): members; events: push",
+    );
   });
 
   it("offers to connect what is not connected", async () => {

@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: npm test
-      - uses: callog-dev/callog/packages/action@v0.5.0
+      - uses: callog-dev/callog/packages/action@v0.5.1
         if: failure()
         with:
           url: https://notify.company.internal
@@ -28,6 +28,26 @@ jobs:
 ```
 
 The route must allow the repository: `allowed_sources.github_repos: [org/repo]`.
+
+`recipients` are the people and teams the notification is for, and the places it is also posted
+to: `github:octocat`, `team:frontend`, `place:deploys`. A place is a room by its name in the
+config repo; the workflow never names a messenger or a channel.
+
+## Plain text, without a route of your own
+
+The built-in `direct` route sends `data.text` to the recipients as it is: people get a personal
+message, places a post. It takes only an API key created with _Direct messages_ (Settings → API
+keys), not the workflow's OIDC token:
+
+```yaml
+- uses: callog-dev/callog/packages/action@v0.5.1
+  with:
+    url: https://notify.company.internal
+    route: direct
+    api-key: ${{ secrets.CALLOG_API_KEY }}
+    recipients: github:octocat, place:deploys
+    data: '{ "text": "Deployed ${{ github.sha }}" }'
+```
 
 ## Inputs
 

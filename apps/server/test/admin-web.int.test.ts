@@ -11,6 +11,7 @@ import {
   tenants,
   unmappedRecipients,
 } from "../src/db/schema";
+import { AppAccessService } from "../src/github/app-access.service";
 import { PeopleService } from "../src/identity/people.service";
 import type { FakeGithub } from "./setup/fake-github";
 import { createTestApp, createTenant, activateConfig } from "./setup/test-app";
@@ -102,6 +103,36 @@ describe("admin web API (integration)", () => {
     const bobCookie = await webLogin(app, githubOAuthUsers, { id: 12, login: "bob-gh" });
     expect((await call("GET", "/api/admin/status", undefined, bobCookie)).statusCode).toBe(403);
     expect((await call("GET", "/api/admin/status")).statusCode).toBe(200);
+  });
+
+  it("names what the GitHub App's installation is missing", async () => {
+    const access = app.get(AppAccessService);
+    expect((await call("GET", "/api/admin/status")).json().github).toBeNull();
+    const kinds = async () =>
+      (await call("GET", "/api/admin/attention")).json().items.map((i: { kind: string }) => i.kind);
+    expect(await kinds()).not.toContain("github_access");
+
+    const granted = github.access;
+    github.access = { permissions: { contents: "read", metadata: "read" }, events: ["push"] };
+    access.forget();
+    try {
+      const gaps = { permissions: ["members"], events: ["organization"] };
+      expect((await call("GET", "/api/admin/status")).json().github).toEqual(gaps);
+      expect((await call("GET", "/api/admin/attention")).json().items).toContainEqual({
+        kind: "github_access",
+        ...gaps,
+      });
+
+      // GitHub is down: unknown, not "everything is missing".
+      access.forget();
+      github.down = true;
+      expect((await call("GET", "/api/admin/status")).json().github).toBeNull();
+      expect(await kinds()).not.toContain("github_access");
+    } finally {
+      github.down = false;
+      github.access = granted;
+      access.forget();
+    }
   });
 
   it("lists teams with members_from resolved to people", async () => {

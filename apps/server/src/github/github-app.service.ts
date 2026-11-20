@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { App } from "@octokit/app";
+import type { AppAccess } from "./app-access";
 import { GITHUB_APP_CONFIG, type GithubAppConfig } from "./github.config";
 
 export interface InstallationInfo {
@@ -9,7 +10,11 @@ export interface InstallationInfo {
   accountLogin: string;
   accountType: string;
   suspended: boolean;
+  access: AppAccess;
 }
+
+/** An admin page waits on this request: fail rather than hang. */
+const ACCESS_TIMEOUT_MS = 5_000;
 
 export type InstallationOctokit = Awaited<ReturnType<App["getInstallationOctokit"]>>;
 
@@ -34,9 +39,21 @@ export class GithubAppService {
         accountLogin: account?.login ?? "",
         accountType: account?.type ?? "",
         suspended: installation.suspended_at != null,
+        access: { permissions: installation.permissions, events: installation.events },
       });
     }
     return installations;
+  }
+
+  async installationAccess(installationId: number): Promise<AppAccess> {
+    const { data } = await this.getApp().octokit.request(
+      "GET /app/installations/{installation_id}",
+      {
+        installation_id: installationId,
+        request: { signal: AbortSignal.timeout(ACCESS_TIMEOUT_MS) },
+      },
+    );
+    return { permissions: data.permissions, events: data.events };
   }
 
   installationOctokit(installationId: number): Promise<InstallationOctokit> {

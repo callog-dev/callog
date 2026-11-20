@@ -3,6 +3,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import { setBounded } from "../common/bounded-map";
 import { DB, type Db } from "../db/db";
 import { identities, persons, USABLE_CONFIDENCE } from "../db/schema";
+import type { AccessGaps } from "../github/app-access";
+import { AppAccessService } from "../github/app-access.service";
 import { GithubAppService } from "../github/github-app.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
 import { TenantsService } from "../tenants/tenants.service";
@@ -24,7 +26,22 @@ export class AdminCheck {
     private readonly tenants: TenantsService,
     private readonly githubApp: GithubAppService,
     private readonly admins: TenantAdminsService,
+    private readonly access: AppAccessService,
   ) {}
+
+  /**
+   * What the App lacks on some organization. Without `members` nobody is seen as an owner,
+   * so a failed sign-in is the only place to say it.
+   */
+  async missingAccess(
+    tenants: { githubInstallationId: number | null }[],
+  ): Promise<AccessGaps | null> {
+    for (const tenant of tenants) {
+      const gaps = await this.access.gaps(tenant.githubInstallationId);
+      if (gaps) return gaps;
+    }
+    return null;
+  }
 
   async isAdmin(tenantId: string, personId: string): Promise<boolean> {
     return (await this.admins.has(tenantId, personId)) || this.isOrgOwner(tenantId, personId);

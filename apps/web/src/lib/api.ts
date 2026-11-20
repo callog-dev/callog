@@ -277,11 +277,27 @@ export interface PlaceInfo {
   defaultFor: string[];
 }
 
+/** What the GitHub App's installation lacks of what the server needs. */
+export interface GithubAccessGaps {
+  permissions: string[];
+  events: string[];
+}
+
+export const describeGithubGaps = (gaps: GithubAccessGaps): string =>
+  [
+    gaps.permissions.length > 0 && `permissions (read): ${gaps.permissions.join(", ")}`,
+    gaps.events.length > 0 && `events: ${gaps.events.join(", ")}`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+
 export interface AdminStatus {
   tenantId: string;
   installationId: number | null;
   org: string;
   configRepo: string;
+  /** Null when nothing is missing. */
+  github: GithubAccessGaps | null;
   config: {
     active: { commitSha: string; routes: number } | null;
     latest: {
@@ -315,7 +331,8 @@ export type AttentionItem =
   | { kind: "config_rejected"; versionId: string; errors: number }
   | { kind: "no_config" | "slack_missing" }
   | { kind: "failed" | "partially_failed" | "unmapped" | "suggested"; count: number }
-  | { kind: "sync_stale"; lastSyncedAt: string | null };
+  | { kind: "sync_stale"; lastSyncedAt: string | null }
+  | ({ kind: "github_access" } & GithubAccessGaps);
 
 export interface Attention {
   items: AttentionItem[];

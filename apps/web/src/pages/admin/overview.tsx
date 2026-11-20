@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { ErrorState } from "@/components/states";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { adminApi, type AttentionItem } from "@/lib/api";
+import { adminApi, describeGithubGaps, type AttentionItem } from "@/lib/api";
 import { ago } from "@/lib/time";
 
 /** What needs attention, each item linking to where it is fixed, then a few counters. */
@@ -85,6 +85,12 @@ function describe(item: AttentionItem): { text: string; to: string; severity: "e
       return {
         text: `The latest config push was rejected (${plural(item.errors, "error")}); the previous version stays active.`,
         to: `/manage/config/${item.versionId}`,
+        severity: "error",
+      };
+    case "github_access":
+      return {
+        text: `The GitHub App is missing ${describeGithubGaps(item)}.`,
+        to: "/manage/integrations",
         severity: "error",
       };
     case "no_config":

@@ -1,5 +1,7 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleInit } from "@nestjs/common";
 import type { InstallationEvent, OrganizationEvent } from "@octokit/webhooks-types";
+import { accessGaps, describeGaps, hasGaps } from "../github/app-access";
+import { AppAccessService } from "../github/app-access.service";
 import { GithubAppService } from "../github/github-app.service";
 import { GithubWebhooksService } from "../github/github-webhooks.service";
 import { TenantsService } from "./tenants.service";
@@ -12,6 +14,7 @@ export class InstallationEvents implements OnModuleInit, OnApplicationBootstrap 
   constructor(
     private readonly webhooks: GithubWebhooksService,
     private readonly githubApp: GithubAppService,
+    private readonly access: AppAccessService,
     private readonly tenants: TenantsService,
   ) {}
 
@@ -52,6 +55,17 @@ export class InstallationEvents implements OnModuleInit, OnApplicationBootstrap 
       });
     }
     await this.tenants.deactivateAllExcept(active.map((i) => i.id));
+    this.access.forget();
+    // An App registered by hand: nothing else says what it lacks until a sync or a sign-in fails.
+    if (active.length === 0) {
+      this.logger.warn("The GitHub App is not installed on any organization");
+    }
+    for (const installation of active) {
+      const gaps = accessGaps(installation.access);
+      if (hasGaps(gaps)) {
+        this.logger.warn(`Installation on ${installation.accountLogin}: ${describeGaps(gaps)}`);
+      }
+    }
   }
 
   private async onOrganization(event: OrganizationEvent): Promise<void> {
@@ -70,6 +84,7 @@ export class InstallationEvents implements OnModuleInit, OnApplicationBootstrap 
       case "created":
       case "unsuspend":
       case "new_permissions_accepted":
+        this.access.forget();
         if (account.type !== "Organization") {
           this.logger.warn(`Ignoring installation ${installation.id} on a ${account.type} account`);
           return;
