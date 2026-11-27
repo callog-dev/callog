@@ -6,20 +6,21 @@ import {
   type SlackPostResult,
   type SlackUsergroup,
 } from "./slack-api";
+import { SlackChannelDirectory } from "./slack-channel-directory";
 import { SlackConnectionsService } from "./slack-connections.service";
 
 /** Slack channel ids (public, private, DM); anything else is a channel name. */
 export const SLACK_CHANNEL_ID = /^[CGD][A-Z0-9]{6,}$/;
-/** An unknown name does not trigger another full channel listing within this window. */
-const RELIST_AFTER_MS = 60_000;
 /** Errors meaning a cached name → id mapping is stale (channel archived or deleted). */
 const STALE_CHANNEL = new Set(["channel_not_found", "is_archived"]);
 
 /** Sends messages to a tenant's Slack: channels (by `#name` or id) and DMs. */
 @Injectable()
 export class SlackSender {
-  /** tenantId → channel name → id, refreshed on a miss (new or renamed channels). */
-  private readonly channelIds = new Map<string, { ids: Map<string, string>; listedAt: number }>();
+  private readonly directories = new Map<
+    string,
+    { api: SlackApi; directory: SlackChannelDirectory }
+  >();
 
   constructor(private readonly connections: SlackConnectionsService) {}
 
@@ -31,15 +32,15 @@ export class SlackSender {
     const api = await this.requireApi(tenantId);
     if (SLACK_CHANNEL_ID.test(channel)) return api.postMessage(channel, message);
     const name = channel.replace(/^#/, "");
-    const { id, listed } = await this.resolveChannel(tenantId, api, name);
+    const directory = this.directory(tenantId, api);
+    const { id, listed } = await directory.find(name);
     try {
       return await api.postMessage(id, message);
     } catch (err) {
-      // A cached id may be stale (an archived channel recreated under the same name has a
-      // new id): list once more. A freshly listed id is not worth a second try.
+      // A remembered id may be stale (an archived channel recreated under the same name has
+      // a new id): list once more. A freshly listed id is not worth a second try.
       if (listed || !(err instanceof SlackApiError && STALE_CHANNEL.has(err.code))) throw err;
-      this.channelIds.delete(tenantId);
-      return api.postMessage((await this.resolveChannel(tenantId, api, name)).id, message);
+      return api.postMessage((await directory.findAgain(name, id)).id, message);
     }
   }
 
@@ -72,22 +73,14 @@ export class SlackSender {
     return group;
   }
 
-  private async resolveChannel(
-    tenantId: string,
-    api: SlackApi,
-    name: string,
-  ): Promise<{ id: string; listed: boolean }> {
-    let cached = this.channelIds.get(tenantId);
-    let listed = false;
-    if (!cached || (!cached.ids.has(name) && Date.now() - cached.listedAt >= RELIST_AFTER_MS)) {
-      const ids = new Map((await api.listChannels()).map((c) => [c.name, c.id]));
-      cached = { ids, listedAt: Date.now() };
-      this.channelIds.set(tenantId, cached);
-      listed = true;
+  /** A tenant gets a new client when its workspace or token changes; so do its channels. */
+  private directory(tenantId: string, api: SlackApi): SlackChannelDirectory {
+    let entry = this.directories.get(tenantId);
+    if (entry?.api !== api) {
+      entry = { api, directory: new SlackChannelDirectory(api) };
+      this.directories.set(tenantId, entry);
     }
-    const id = cached.ids.get(name);
-    if (!id) throw new SlackApiError("channel_not_found");
-    return { id, listed };
+    return entry.directory;
   }
 
   private async requireApi(tenantId: string): Promise<SlackApi> {

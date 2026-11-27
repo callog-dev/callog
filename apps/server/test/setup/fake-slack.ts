@@ -2,6 +2,8 @@ import {
   SlackApiError,
   type SlackApi,
   type SlackChannel,
+  type SlackChannelPage,
+  type SlackChannelScope,
   type SlackMessagePayload,
   type SlackUser,
   type SlackUsergroup,
@@ -48,13 +50,27 @@ export class FakeSlackSocket {
 /** In-memory Slack workspace. One instance serves every token; only GOOD_SLACK_TOKEN is valid. */
 export class FakeSlack {
   users: SlackUser[] = [];
+  /** Channels the bot is a member of. */
   channels: SlackChannel[] = [{ id: "C0ALERTS1", name: "alerts" }];
+  /** Public channels the bot was not invited to. */
+  publicChannels: SlackChannel[] = [];
+  /** Channels per page, whatever limit the caller asks for. */
+  channelPageSize = 200;
+  /** Channel pages served, in order. */
+  channelPages: { scope: SlackChannelScope; cursor: string | undefined }[] = [];
+  /**
+   * Channel pages allowed per window. One more is refused with `ratelimited`, and so is
+   * everything until `retryAfter` seconds have passed.
+   */
+  channelRateLimit: { pages: number; retryAfter: number } | undefined;
+  /** The next request with a cursor is refused once, as Slack does with an expired one. */
+  expireChannelCursor = false;
+  private channelWindow = { served: 0, blockedUntil: 0 };
   usergroups: SlackUsergroup[] = [];
   posted: { channel: string; message: SlackMessagePayload; ts?: string }[] = [];
   updated: { channel: string; ts: string; message: SlackMessagePayload }[] = [];
   /** ts values of messages that were deleted in Slack (updates fail with message_not_found). */
   deletedTs = new Set<string>();
-  listChannelsCalls = 0;
   /** Errors thrown by the next postMessage calls, in order. */
   failures: SlackApiError[] = [];
   /** Socket Mode clients created, newest last; errors their next starts throw. */
@@ -79,11 +95,7 @@ export class FakeSlack {
           ? Promise.resolve()
           : Promise.reject(new SlackApiError("invalid_auth")),
       listUsers: () => guard(() => this.users),
-      listChannels: () =>
-        guard(() => {
-          this.listChannelsCalls++;
-          return this.channels;
-        }),
+      listChannelPage: (scope, cursor) => guard(() => this.channelPage(scope, cursor)),
       listUsergroups: () => guard(() => this.usergroups),
       openDm: (userId) => guard(() => `D${userId}`),
       postMessage: (channel, message) =>
@@ -102,6 +114,37 @@ export class FakeSlack {
         }),
     };
   };
+
+  /** Back to a small workspace nobody has listed yet, as between two tests. */
+  resetChannelListing() {
+    this.publicChannels = [];
+    this.channelPages = [];
+    this.channelRateLimit = undefined;
+    this.expireChannelCursor = false;
+    this.channelWindow = { served: 0, blockedUntil: 0 };
+  }
+
+  private channelPage(scope: SlackChannelScope, cursor: string | undefined): SlackChannelPage {
+    const limit = this.channelRateLimit;
+    if (limit) {
+      if (this.channelWindow.served >= limit.pages && Date.now() >= this.channelWindow.blockedUntil)
+        this.channelWindow = { served: 0, blockedUntil: Date.now() + limit.retryAfter * 1000 };
+      if (Date.now() < this.channelWindow.blockedUntil)
+        throw new SlackApiError("ratelimited", limit.retryAfter);
+      this.channelWindow.served++;
+    }
+    if (cursor !== undefined && this.expireChannelCursor) {
+      this.expireChannelCursor = false;
+      throw new SlackApiError("invalid_cursor");
+    }
+    this.channelPages.push({ scope, cursor });
+    const all = scope === "member" ? this.channels : [...this.channels, ...this.publicChannels];
+    const end = Number(cursor ?? 0) + this.channelPageSize;
+    return {
+      channels: all.slice(end - this.channelPageSize, end),
+      nextCursor: end < all.length ? String(end) : undefined,
+    };
+  }
 
   user(id: string, name: string, email?: string, extra: Partial<SlackUser> = {}): SlackUser {
     return { id, name, realName: name, email, deleted: false, isBot: false, ...extra };

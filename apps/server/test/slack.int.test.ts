@@ -1,6 +1,6 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { and, eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DB, type Db } from "../src/db/db";
 import { identities, persons, slackConnections, tenants } from "../src/db/schema";
 import { PeopleService } from "../src/identity/people.service";
@@ -35,7 +35,7 @@ describe("Slack (integration)", () => {
     slack.posted = [];
     slack.failures = [];
     slack.channels = [{ id: "C0ALERTS1", name: "alerts" }];
-    slack.listChannelsCalls = 0;
+    slack.resetChannelListing();
     tenantId = await createTenant(app, 900);
   });
 
@@ -197,7 +197,7 @@ describe("Slack (integration)", () => {
       await app.get(SlackSender).postToChannel(tenantId, "#alerts", { text: "again" });
 
       expect(slack.posted.map((p) => p.channel)).toEqual(["C0ALERTS1", "C0ALERTS1"]);
-      expect(slack.listChannelsCalls).toBe(1);
+      expect(slack.channelPages).toHaveLength(1);
     });
 
     it("re-resolves a channel name whose cached id was archived (recreated channel)", async () => {
@@ -208,7 +208,7 @@ describe("Slack (integration)", () => {
 
       await sender.postToChannel(tenantId, "#alerts", { text: "after" });
       expect(slack.posted.map((p) => p.channel)).toEqual(["C0ALERTS1", "C0NEWALRT"]);
-      expect(slack.listChannelsCalls).toBe(2);
+      expect(slack.channelPages.filter((p) => p.scope === "member")).toHaveLength(2);
     });
 
     it("does not list all channels again for every message to an unknown one", async () => {
@@ -218,7 +218,112 @@ describe("Slack (integration)", () => {
           /channel_not_found/,
         );
       }
-      expect(slack.listChannelsCalls).toBe(1);
+      expect(slack.channelPages).toEqual([
+        { scope: "member", cursor: undefined },
+        { scope: "public", cursor: undefined },
+      ]);
+    });
+
+    describe("in a workspace with thousands of channels", () => {
+      const PAGES = 25;
+
+      beforeEach(() => {
+        slack.publicChannels = Array.from({ length: PAGES * slack.channelPageSize }, (_, i) => ({
+          id: `C0PUB${String(i).padStart(5, "0")}`,
+          name: `team-${i}`,
+        }));
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      const post = (channel: string) =>
+        app.get(SlackSender).postToChannel(tenantId, channel, { text: "hi" });
+      const lastChannel = () => slack.publicChannels.at(-1)!;
+      const publicCursors = () =>
+        slack.channelPages.filter((p) => p.scope === "public").map((p) => p.cursor);
+      /** Stops the listing part-way: Slack refuses for longer than a lookup waits. */
+      const stopByRateLimit = async () => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        slack.channelRateLimit = { pages: 6, retryAfter: 120 };
+        const refused = await post(`#${lastChannel().name}`).catch((err: unknown) => err);
+        expect(refused).toMatchObject({ code: "ratelimited", retryAfter: 120 });
+        expect(slack.posted).toEqual([]);
+      };
+
+      it("finds a channel the bot is in without listing the workspace", async () => {
+        slack.channelRateLimit = { pages: 1, retryAfter: 60 };
+
+        await post("#alerts");
+
+        expect(slack.posted.map((p) => p.channel)).toEqual(["C0ALERTS1"]);
+        expect(slack.channelPages).toEqual([{ scope: "member", cursor: undefined }]);
+      });
+
+      it("stops listing at the page that has the channel", async () => {
+        await post("#team-450");
+
+        expect(slack.posted.map((p) => p.channel)).toEqual(["C0PUB00450"]);
+        expect(publicCursors()).toHaveLength(3);
+      });
+
+      it("waits out a short rate limit and delivers on the first attempt", async () => {
+        slack.channelRateLimit = { pages: 6, retryAfter: 0.05 };
+
+        await post(`#${lastChannel().name}`);
+
+        expect(slack.posted.map((p) => p.channel)).toEqual([lastChannel().id]);
+        expect(publicCursors()).toHaveLength(PAGES + 1);
+        expect(new Set(publicCursors()).size).toBe(PAGES + 1);
+      });
+
+      it("picks up where a long rate limit stopped it instead of starting over", async () => {
+        await stopByRateLimit();
+        const served = slack.channelPages.length;
+
+        // Still refused, and known to be: Slack is not asked again before the limit lifts.
+        await expect(post(`#${lastChannel().name}`)).rejects.toThrow(/ratelimited/);
+        expect(slack.channelPages).toHaveLength(served);
+
+        slack.channelRateLimit = undefined;
+        vi.advanceTimersByTime(121_000);
+        await post(`#${lastChannel().name}`);
+
+        expect(slack.posted.map((p) => p.channel)).toEqual([lastChannel().id]);
+        expect(publicCursors()).toHaveLength(PAGES + 1);
+        expect(new Set(publicCursors()).size).toBe(PAGES + 1);
+      });
+
+      it("lists again when the cursor it stopped at has expired", async () => {
+        await stopByRateLimit();
+
+        slack.channelRateLimit = undefined;
+        slack.expireChannelCursor = true;
+        vi.advanceTimersByTime(121_000);
+        await post(`#${lastChannel().name}`);
+
+        expect(slack.posted.map((p) => p.channel)).toEqual([lastChannel().id]);
+      });
+
+      it("forgets the channels of a workspace that was replaced by another", async () => {
+        await post("#alerts");
+        slack.channels = [{ id: "C0OTHERWS", name: "alerts" }];
+        await connect();
+
+        await post("#alerts");
+
+        expect(slack.posted.map((p) => p.channel)).toEqual(["C0ALERTS1", "C0OTHERWS"]);
+      });
+
+      it("posts to a channel id without listing anything", async () => {
+        slack.channelRateLimit = { pages: 0, retryAfter: 120 };
+
+        await post("C0PUB04999");
+
+        expect(slack.posted.map((p) => p.channel)).toEqual(["C0PUB04999"]);
+        expect(slack.channelPages).toEqual([]);
+      });
     });
 
     it("reports unknown channels", async () => {
