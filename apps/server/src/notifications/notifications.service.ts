@@ -15,6 +15,7 @@ import {
   parseRef,
   placeOf,
   splitRecipients,
+  type Config,
   type Route,
 } from "@callog/config-schema";
 import { renderGroupKey, renderRouteRecipients, TemplateRenderError } from "@callog/templates";
@@ -69,6 +70,27 @@ export class NotificationsService {
     private readonly trace: TraceService,
   ) {}
 
+  /**
+   * Whom a request reaches: the recipients it names, then the route's own. Those come from
+   * data the sender may not control, so the ones that lead nowhere are dropped instead of
+   * failing the request.
+   */
+  recipientsOf(route: Route, config: Config, request: Pick<NotifyRequest, "recipients" | "data">) {
+    return [
+      ...new Set([
+        ...request.recipients,
+        ...(
+          this.renderLeniently(route, "recipients", () =>
+            renderRouteRecipients(route, request.data),
+          ) ?? []
+        ).filter((recipient) => {
+          const place = placeOf(recipient);
+          return place === undefined || isKnownPlace(config, place);
+        }),
+      ]),
+    ].slice(0, MAX_RECIPIENTS);
+  }
+
   async accept(
     producer: Producer,
     request: NotifyRequest,
@@ -89,9 +111,8 @@ export class NotificationsService {
     if (!route) throw new NotFoundException(`Route "${request.route}" not found`);
     this.auth.assertAllowed(route, producer);
 
-    const isKnownPlace = (name: string) => ownValue(active.config.places, name) !== undefined;
     const unknownPlaces = splitRecipients(request.recipients).places.filter(
-      (name) => !isKnownPlace(name),
+      (name) => !isKnownPlace(active.config, name),
     );
     if (unknownPlaces.length > 0) {
       throw new UnprocessableEntityException({
@@ -121,21 +142,7 @@ export class NotificationsService {
       }
     }
 
-    // The route's own recipients come from data the sender may not control, so the ones
-    // that lead nowhere are dropped instead of failing the request.
-    const recipients = [
-      ...new Set([
-        ...request.recipients,
-        ...(
-          this.renderLeniently(route, "recipients", () =>
-            renderRouteRecipients(route, request.data),
-          ) ?? []
-        ).filter((recipient) => {
-          const place = placeOf(recipient);
-          return place === undefined || isKnownPlace(place);
-        }),
-      ]),
-    ].slice(0, MAX_RECIPIENTS);
+    const recipients = this.recipientsOf(route, active.config, request);
     if (route.id === DIRECT_ROUTE.id && recipients.length === 0) {
       throw new UnprocessableEntityException("The direct route needs recipients");
     }
@@ -373,6 +380,10 @@ export class NotificationsService {
     }
     return existing.notificationId;
   }
+}
+
+function isKnownPlace(config: Config, name: string): boolean {
+  return ownValue(config.places, name) !== undefined;
 }
 
 function hashRequest(request: { request: NotifyRequest; source: Producer["source"] }): string {

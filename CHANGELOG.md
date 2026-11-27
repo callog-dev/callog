@@ -17,6 +17,13 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
   runs again. **Load now** on the Config page checks the places again, also when the config
   has not changed; so does connecting a workspace.
 
+### Changed
+
+- "Send test" says where the test goes and asks before it sends. A test is a real notification
+  of the route: it is posted to the route's places and channels, and to you only when the
+  route sends personal copies. The checklist used to call it "to yourself"; now the places
+  are listed in a confirmation, and nothing is posted until you confirm.
+
 ### Fixed
 
 - A notification to a Slack channel given by name no longer fails with `slack: ratelimited`

@@ -13,6 +13,8 @@ import {
 interface ConfirmOptions {
   title: string;
   description?: ReactNode;
+  /** What does not fit a line of text, e.g. the list of what is affected. */
+  body?: ReactNode;
   /** The button that goes ahead, e.g. "Revoke". */
   action: string;
   destructive?: boolean;
@@ -57,6 +59,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               <AlertDialogDescription>{options.description}</AlertDialogDescription>
             )}
           </AlertDialogHeader>
+          {options?.body}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction

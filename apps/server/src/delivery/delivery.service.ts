@@ -16,15 +16,9 @@ import { deliveries, notifications, type ProviderMessageRef, type TraceNote } fr
 import { MetricsService } from "../metrics/metrics.service";
 import { RecipientResolver, type Resolution } from "../routing/recipient-resolver";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
-import {
-  defaultTargets,
-  parseDestination,
-  routeTargets,
-  targetKey,
-  type Target,
-} from "./destinations";
+import { parseDestination, targetKey } from "./destinations";
 import { PreferencesService } from "../identity/preferences.service";
-import { PersonalCopies, type PersonalCopy } from "./personal-copies";
+import { DeliveryPlanner } from "./delivery-planner";
 import { DESTINATION_RATE_LIMITER, DestinationRateLimiter } from "./rate-limiter";
 
 type Notification = typeof notifications.$inferSelect;
@@ -74,7 +68,7 @@ export class DeliveryService {
     private readonly metrics: MetricsService,
     @Inject(DESTINATION_RATE_LIMITER) private readonly limiter: DestinationRateLimiter,
     private readonly preferences: PreferencesService,
-    private readonly personalCopies: PersonalCopies,
+    private readonly planner: DeliveryPlanner,
   ) {}
 
   async deliver(notificationId: string, attempts: AttemptInfo): Promise<NotificationStatus> {
@@ -190,13 +184,19 @@ export class DeliveryService {
     recipients: Ref[],
     places: string[],
   ): Promise<Delivery[]> {
-    const targets = routeTargets(route, config, this.channels, places);
+    const { rooms, targets, personal } = await this.planner.plan(
+      notification.tenantId,
+      route,
+      config,
+      recipients,
+      places,
+    );
     const notes: TraceNote[] = [];
     // Unmapped recipients are counted once per notification, not per retry.
     const counted = new Set<ChannelId>();
     const mentionable = new Set<string>();
     if (route.mentions !== "none") {
-      for (const provider of new Set(targets.map((t) => t.provider))) {
+      for (const provider of new Set(rooms.map((t) => t.provider))) {
         const resolution = await this.resolver.resolve(
           notification.tenantId,
           config,
@@ -224,23 +224,7 @@ export class DeliveryService {
         }
       }
     }
-    const planned = new Map<string, Target & Partial<PersonalCopy>>();
-    const plan = (copy: Target & Partial<PersonalCopy>) => {
-      const key = targetKey(copy);
-      const existing = planned.get(key);
-      // A room that already gets the notification needs no second message, only the names.
-      if (existing) existing.forPeople = [...(existing.forPeople ?? []), ...(copy.forPeople ?? [])];
-      else planned.set(key, { ...copy });
-    };
-    targets.forEach(plan);
-    if (route.dm) {
-      const personal = await this.personalCopies.plan(
-        notification.tenantId,
-        route,
-        config,
-        recipients,
-      );
-      personal.copies.forEach(plan);
+    if (personal) {
       notes.push(...personal.notes);
       // Someone with no account anywhere got no copy: an admin has to see that.
       for (const channel of this.channels.all()) {
@@ -254,18 +238,17 @@ export class DeliveryService {
         );
       }
     }
-    if (planned.size === 0) defaultTargets(route, config, this.channels).forEach(plan);
     if (notes.length > 0) {
       await this.db
         .update(notifications)
         .set({ trace: notes })
         .where(eq(notifications.id, notification.id));
     }
-    if (planned.size === 0) return [];
+    if (targets.length === 0) return [];
     return this.db
       .insert(deliveries)
       .values(
-        [...planned.values()].map((copy) => ({
+        targets.map((copy) => ({
           tenantId: notification.tenantId,
           notificationId: notification.id,
           ...copy,

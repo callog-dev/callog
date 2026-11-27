@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -15,11 +16,22 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { ownValue, parseRef, slugSchema, type ConfigIssue, type Ref } from "@callog/config-schema";
+import {
+  ownValue,
+  parseRef,
+  slugSchema,
+  splitRecipients,
+  type Config,
+  type ConfigIssue,
+  type Ref,
+  type Route,
+} from "@callog/config-schema";
 import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { parseBody } from "../admin/parse-body";
 import { PlaceChecks } from "../channels/place-checks";
+import { DeliveryPlanner } from "../delivery/delivery-planner";
+import { parseDestination, type Target } from "../delivery/destinations";
 import { DB, type Db } from "../db/db";
 import {
   configVersions,
@@ -38,6 +50,8 @@ import { AuditService } from "../audit/audit.service";
 import { LifecycleJobs } from "../lifecycle/lifecycle.jobs";
 import { RetentionService } from "../lifecycle/retention.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import type { NotifyRequest } from "../notifications/notify-request";
+import type { Producer } from "../producers/producer-auth.service";
 import { TraceService } from "../notifications/trace.service";
 import { PreferencesService } from "../identity/preferences.service";
 import { TenantAdminsService } from "../identity/tenant-admins.service";
@@ -57,6 +71,7 @@ import {
 } from "../telegram/admin-telegram.controller";
 import { TelegramSender } from "../telegram/telegram-sender";
 import { TelegramApiError } from "../telegram/telegram-api";
+import { TelegramChatTitles } from "../telegram/telegram-chat-titles";
 import { TelegramChatsService } from "../telegram/telegram-chats.service";
 import { TelegramConnectionsService } from "../telegram/telegram-connections.service";
 import { RecipientResolver, refsNaming } from "../routing/recipient-resolver";
@@ -147,6 +162,8 @@ function identityView(i: typeof identities.$inferSelect) {
 }
 
 /** Admin section of the web UI. Replaces the ADMIN_TOKEN endpoints for people. */
+const testRouteBody = z.object({ configVersion: z.string().optional() });
+
 @Controller("api/admin")
 @UseGuards(AdminSessionGuard)
 export class AdminApiController {
@@ -176,6 +193,8 @@ export class AdminApiController {
     private readonly retention: RetentionService,
     private readonly telegramSender: TelegramSender,
     private readonly placeChecks: PlaceChecks,
+    private readonly planner: DeliveryPlanner,
+    private readonly chatTitles: TelegramChatTitles,
   ) {}
 
   // ---- Teams ----
@@ -641,33 +660,98 @@ export class AdminApiController {
   // ---- Test notification ----
 
   /**
+   * Where a test of the route would be posted, from the planning a real notification goes
+   * through: the admin confirms these before anything is sent.
+   */
+  @Get("routes/:routeId/test")
+  async testTargets(@Req() req: SessionRequest, @Param("routeId") routeId: string) {
+    const { tenantId } = req.session!;
+    const { config, configVersion, route, body } = await this.testOf(req.session!, routeId);
+    const { people, places } = splitRecipients(this.pipeline.recipientsOf(route, config, body));
+    const { targets } = await this.planner.plan(tenantId, route, config, people, places);
+    const rooms = targets.flatMap((t) => [t, ...(t.fallbacks ?? [])]);
+    const [name, titles] = await Promise.all([
+      this.trace.names(
+        tenantId,
+        targets.flatMap((t) => t.forPeople ?? []),
+      ),
+      // Telegram rooms are raw chat ids; show the chat title when the bot can see it.
+      this.chatTitles.titles(
+        tenantId,
+        rooms
+          .filter(
+            (t) => t.provider === "telegram" && parseDestination(t.destination).kind === "place",
+          )
+          .map((t) => t.destination),
+      ),
+    ]);
+    const describe = ({ provider, destination }: Target) => {
+      const { kind, id } = parseDestination(destination);
+      return { provider, kind, destination: id, label: titles.get(destination) };
+    };
+    return {
+      configVersion,
+      targets: targets.map((target) => ({
+        ...describe(target),
+        for: (target.forPeople ?? []).map(name),
+        // Where the message goes instead when this one cannot be delivered.
+        fallbacks: (target.fallbacks ?? []).map(describe),
+      })),
+    };
+  }
+
+  /**
    * Sends the route's first example through the normal pipeline, mentioning whoever pressed
    * the button: it proves the config, the channels and the person's links at once.
    */
   @Post("routes/:routeId/test")
-  async testRoute(@Req() req: SessionRequest, @Param("routeId") routeId: string) {
-    const session = req.session!;
-    const route = ownValue(
-      (await this.configs.getActive(session.tenantId))?.config.routes ?? {},
-      routeId,
-    );
+  async testRoute(
+    @Req() req: SessionRequest,
+    @Param("routeId") routeId: string,
+    @Body() confirmed: unknown,
+  ) {
+    const { configVersion, producer, body } = await this.testOf(req.session!, routeId);
+    // The admin confirmed the places of one config: another one may post elsewhere.
+    const expected = parseBody(testRouteBody, confirmed ?? {}).configVersion;
+    if (expected && expected !== configVersion) {
+      throw new ConflictException("The config changed: check where the test goes again");
+    }
+    const { notificationId } = await this.pipeline.accept(producer, body);
+    return { notificationId };
+  }
+
+  /** The notification "Send test" sends: the route's first example, addressed to the admin. */
+  private async testOf(
+    session: NonNullable<SessionRequest["session"]>,
+    routeId: string,
+  ): Promise<{
+    config: Config;
+    configVersion: string;
+    route: Route;
+    producer: Producer;
+    body: NotifyRequest;
+  }> {
+    const active = await this.configs.getActive(session.tenantId);
+    const route = active && ownValue(active.config.routes, routeId);
     if (!route) throw new NotFoundException(`Route "${routeId}" is not in the active config`);
     const login =
       session.githubLogin ?? (await this.githubLoginOf(session.tenantId, session.personId!));
-    const { notificationId } = await this.pipeline.accept(
-      {
+    return {
+      config: active.config,
+      configVersion: active.versionId,
+      route,
+      producer: {
         tenantId: session.tenantId,
         source: { type: "admin_test", actor: login ? `@${login}` : "an admin" },
         label: "A test from the admin UI",
       },
-      {
+      body: {
         route: route.id,
         data: route.examples[0]?.data ?? {},
         recipients: login ? [`github:${login}`] : [],
         update: false,
       },
-    );
-    return { notificationId };
+    };
   }
 
   // ---- Channels ----
