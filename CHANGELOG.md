@@ -10,6 +10,12 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 
 ### Added
 
+- `email_domains` in `config.yaml`: the organization's work email domains. A commit made as
+  `alice@acme.com` (or such a verified domain email) links the GitHub account of the person
+  whose Slack email is `alice@acme.io` when both domains are listed, with the same confidence
+  as the Slack email itself. Public mail
+  providers are rejected.
+
 - The Slack channels behind places are checked when a config is loaded, not in the first
   notification. A place whose channel does not exist, was renamed or archived, or is private
   without the bot in it is named on the Config page and in Settings → Places. A rate limit
@@ -32,6 +38,13 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
   audit entry.
 
 ### Changed
+
+- GitHub accounts are matched against commits of the last year instead of the last 90 days.
+  A work email in older or rare commits now suggests a link for an admin to confirm; a link
+  usable for mentions still needs 3 commits in the last 90 days.
+- The GitHub sync report (`POST /admin/tenants/:id/github/sync` and the log) lists members
+  with only a suggested link in `suggestedMembers`. `unmatched` now holds only members with
+  no link at all; before, suggested members were counted there too.
 
 - `GET /v1/notifications/:id` answers only the sender of the notification — the same API key,
   or the same repository for GitHub Actions. Other senders of the organization get `404`, as
@@ -59,6 +72,9 @@ None. To see the state of the places of a config that was loaded before the upgr
 **Load now** on the Config page once. In a large workspace, inviting the bot to the channels
 it posts to (or giving a place the channel ID instead of its name) keeps the lookup to a
 single request. Config repos already created from the template are not affected.
+The GitHub sync reads a year of commits: a repository with more than 100 commits a year
+takes a few more GitHub API requests per hourly sync, at most 5 per repository. A config repo
+that sets `email_domains` needs the `notify validate` action of this release.
 
 ## [0.5.1]
 
