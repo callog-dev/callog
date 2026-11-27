@@ -190,4 +190,33 @@ describe("DeliveriesTab", () => {
     expect(screen.getByText(/^Sent to/)).toHaveTextContent("Sent to #ops instead");
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
+
+  it("says which sender cancelled a notification", async () => {
+    server.use(
+      http.get("*/api/routes", () =>
+        HttpResponse.json({ configRepo: "acme/notify-config", commitSha: null, routes: [] }),
+      ),
+      http.get("*/api/admin/notifications", () =>
+        HttpResponse.json({ items: [{ ...row, status: "cancelled" }], nextBefore: null }),
+      ),
+      http.get("*/api/admin/notifications/:id", () =>
+        HttpResponse.json({
+          ...details,
+          status: "cancelled",
+          cancelled: {
+            at: "2026-10-31T10:05:00Z",
+            by: { type: "sender", source: { type: "api_key", apiKeyName: "billing" } },
+          },
+        }),
+      ),
+    );
+    renderPage(
+      <Routes>
+        <Route path="/manage/deliveries/:id?" element={<DeliveriesTab />} />
+      </Routes>,
+      "/manage/deliveries/n1",
+    );
+
+    expect(await screen.findByText(/Cancelled by the sender, key billing/)).toBeInTheDocument();
+  });
 });

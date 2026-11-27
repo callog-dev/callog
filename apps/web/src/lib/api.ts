@@ -120,15 +120,17 @@ export interface DeliverySummary {
   status: "pending" | "sent" | "failed" | "cancelled";
 }
 
+export type NotificationSource =
+  | { type: "github_oidc"; repository: string }
+  | { type: "api_key"; apiKeyName: string }
+  | { type: "hook"; hookId: string; hookName: string; routeId: string }
+  | { type: "admin_test"; actor: string };
+
 export interface NotificationRow {
   id: string;
   route: string;
   status: NotificationStatus;
-  source:
-    | { type: "github_oidc"; repository: string }
-    | { type: "api_key"; apiKeyName: string }
-    | { type: "hook"; hookId: string; hookName: string; routeId: string }
-    | { type: "admin_test"; actor: string };
+  source: NotificationSource;
   threadKey: string | null;
   createdAt: string;
   deliveries: DeliverySummary[];
@@ -175,7 +177,8 @@ export interface TracedDelivery extends DeliverySummary {
 }
 
 /** Who stopped a notification: an admin (`@login` or a name), or its sender. */
-export type CancelledBy = { type: "admin"; actor: string } | { type: "sender" };
+export type CancelledBy =
+  { type: "admin"; actor: string } | { type: "sender"; source: NotificationSource };
 
 export interface NotificationDetails extends Omit<NotificationRow, "deliveries"> {
   data: Record<string, unknown>;

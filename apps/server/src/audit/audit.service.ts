@@ -9,6 +9,9 @@ export interface AuditActor {
   githubLogin: string | null;
 }
 
+/** Callog itself, or a sender: nobody with a seat in the admin UI. */
+export const SYSTEM_ACTOR: AuditActor = { personId: null, githubLogin: null };
+
 export interface AuditEntry {
   tenantId: string;
   action: string;

@@ -31,6 +31,8 @@ dm: true
 template: [{ text: "{{ data.msg }}" }]`,
 };
 
+const SENDER = { type: "api_key", apiKeyId: "k", apiKeyName: "ci" } as const;
+
 describe("reaching a person another way (integration)", () => {
   let app: NestFastifyApplication;
   let slack: FakeSlack;
@@ -96,7 +98,7 @@ describe("reaching a person another way (integration)", () => {
         tenantId,
         routeId: "r",
         configVersionId: versionId,
-        source: { type: "api_key", apiKeyId: "k", apiKeyName: "ci" },
+        source: SENDER,
         data: { msg: "backup failed" },
         recipients,
       })
@@ -170,7 +172,9 @@ describe("reaching a person another way (integration)", () => {
       "github:ghost",
       "team:ghosts",
     ]);
-    const forSender = await app.get(NotificationsService).get(tenantId, rows[0]!.notificationId);
+    const forSender = await app
+      .get(NotificationsService)
+      .get({ tenantId, source: SENDER }, rows[0]!.notificationId);
 
     const [notification] = await db.select().from(notifications);
     const trace = await app.get(TraceService).of(notification!);

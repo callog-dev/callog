@@ -98,7 +98,7 @@ describe("cancelling a notification (integration)", () => {
     expect(audit).toMatchObject({
       action: "notification.cancelled",
       actorGithubLogin: "octocat",
-      details: { notificationId: id, deliveries: 0 },
+      details: { notificationId: id, deliveries: 0, by: BY_ADMIN },
     });
 
     expect(await delivery.deliver(id, { attempt: 1, maxAttempts: 8 })).toBe("cancelled");
@@ -119,7 +119,7 @@ describe("cancelling a notification (integration)", () => {
       .select()
       .from(auditLog)
       .where(eq(auditLog.tenantId, producer.tenantId));
-    expect(audit!.details).toEqual({ notificationId: id, deliveries: 1 });
+    expect(audit!.details).toEqual({ notificationId: id, deliveries: 1, by: BY_ADMIN });
     expect(await jobs()).toBe(0);
 
     expect(await delivery.deliver(id, { attempt: 2, maxAttempts: 8 })).toBe("cancelled");

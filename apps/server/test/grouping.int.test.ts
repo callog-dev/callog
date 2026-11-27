@@ -98,7 +98,12 @@ describe("grouping repeats (integration)", () => {
     });
     await app
       .get(NotificationsService)
-      .cancel(producer.tenantId, notificationId, { type: "sender" }, ADMIN);
+      .cancel(
+        producer.tenantId,
+        notificationId,
+        { type: "sender", source: producer.source },
+        ADMIN,
+      );
     expect(
       await app.get(DeliveryService).deliver(notificationId, { attempt: 1, maxAttempts: 8 }),
     ).toBe("cancelled");

@@ -1,14 +1,12 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { AuditService, type AuditActor } from "../audit/audit.service";
+import { AuditService, SYSTEM_ACTOR, type AuditActor } from "../audit/audit.service";
 import { DB, type Db, type DbOrTx } from "../db/db";
 import { auditLog, persons, tenantAdmins } from "../db/schema";
 
 const ROLE_ACTIONS = ["admin.granted", "admin.revoked"] as const;
 export type AdminRoleAction = (typeof ROLE_ACTIONS)[number];
-
-const SYSTEM: AuditActor = { personId: null, githubLogin: null };
 
 /**
  * The admin role granted inside the product. GitHub org owners are admins
@@ -64,7 +62,7 @@ export class TenantAdminsService {
 
   /** A person who left (inactive) keeps no role; runs with the deactivation. */
   async revokeOnDeactivation(executor: DbOrTx, tenantId: string, personId: string): Promise<void> {
-    if (await this.remove(executor, tenantId, personId, SYSTEM, { reason: "inactive" })) {
+    if (await this.remove(executor, tenantId, personId, SYSTEM_ACTOR, { reason: "inactive" })) {
       this.logger.log(`Admin role of person ${personId} revoked: person is inactive`);
     }
   }
