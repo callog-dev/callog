@@ -359,6 +359,20 @@ export class AdminApiController {
     };
   }
 
+  /** Stops a notification that is not delivered yet; what was already sent stays. */
+  @Post("notifications/:id/cancel")
+  @HttpCode(200)
+  async cancel(@Req() req: SessionRequest, @Param("id", ParseUUIDPipe) id: string) {
+    const session = req.session!;
+    await this.pipeline.cancel(
+      session.tenantId,
+      id,
+      { type: "admin", actor: signedBy(await this.loginOf(session)) },
+      session,
+    );
+    return { status: "cancelled" };
+  }
+
   /** Sends the failed deliveries of a failed or partially failed notification again. */
   @Post("notifications/:id/retry")
   @HttpCode(202)
@@ -734,15 +748,14 @@ export class AdminApiController {
     const active = await this.configs.getActive(session.tenantId);
     const route = active && ownValue(active.config.routes, routeId);
     if (!route) throw new NotFoundException(`Route "${routeId}" is not in the active config`);
-    const login =
-      session.githubLogin ?? (await this.githubLoginOf(session.tenantId, session.personId!));
+    const login = await this.loginOf(session);
     return {
       config: active.config,
       configVersion: active.versionId,
       route,
       producer: {
         tenantId: session.tenantId,
-        source: { type: "admin_test", actor: login ? `@${login}` : "an admin" },
+        source: { type: "admin_test", actor: signedBy(login) },
         label: "A test from the admin UI",
       },
       body: {
@@ -1108,6 +1121,10 @@ export class AdminApiController {
     return result;
   }
 
+  private async loginOf(session: NonNullable<SessionRequest["session"]>) {
+    return session.githubLogin ?? (await this.githubLoginOf(session.tenantId, session.personId!));
+  }
+
   private async githubLoginOf(tenantId: string, personId: string): Promise<string | undefined> {
     const [account] = await this.db
       .select({ handle: identities.handle })
@@ -1140,4 +1157,9 @@ export class AdminApiController {
       throw err;
     }
   }
+}
+
+/** How an admin's action is signed where other people see it. */
+function signedBy(login: string | undefined): string {
+  return login ? `@${login}` : "an admin";
 }

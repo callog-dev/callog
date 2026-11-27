@@ -120,6 +120,50 @@ describe("DeliveriesTab", () => {
     await waitFor(() => expect(retried).toEqual(["n1"]));
   });
 
+  it("cancels a notification still on its way, after asking, and says who cancelled it", async () => {
+    const cancelled: string[] = [];
+    const sending = {
+      ...details,
+      status: "processing",
+      cancelled: null,
+      deliveries: [details.deliveries[0], { ...details.deliveries[1], status: "pending" }],
+    };
+    let shown: object = sending;
+    server.use(
+      http.get("*/api/routes", () =>
+        HttpResponse.json({ configRepo: "acme/notify-config", commitSha: null, routes: [] }),
+      ),
+      http.get("*/api/admin/notifications", () =>
+        HttpResponse.json({ items: [{ ...row, status: "processing" }], nextBefore: null }),
+      ),
+      http.get("*/api/admin/notifications/:id", () => HttpResponse.json(shown)),
+      http.post("*/api/admin/notifications/:id/cancel", ({ params }) => {
+        cancelled.push(params.id as string);
+        shown = {
+          ...sending,
+          status: "cancelled",
+          cancelled: { at: "2026-10-31T10:05:00Z", by: { type: "admin", actor: "@alice" } },
+          deliveries: [sending.deliveries[0], { ...sending.deliveries[1], status: "cancelled" }],
+        };
+        return HttpResponse.json({ status: "cancelled" });
+      }),
+    );
+    renderPage(
+      <Routes>
+        <Route path="/manage/deliveries/:id?" element={<DeliveriesTab />} />
+      </Routes>,
+      "/manage/deliveries/n1",
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "Cancel sending" }));
+    expect(screen.getByText("Stop sending this notification?")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Stop sending" }));
+    await waitFor(() => expect(cancelled).toEqual(["n1"]));
+
+    expect(await screen.findByText(/Cancelled by @alice/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel sending" })).not.toBeInTheDocument();
+  });
+
   it("traces a notification: what took over, whom it was for, who was left out", async () => {
     server.use(
       http.get("*/api/routes", () =>

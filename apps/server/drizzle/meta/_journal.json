@@ -134,6 +134,13 @@
       "when": 1794804600788,
       "tag": "0018_notification_urgency",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795767396059,
+      "tag": "0019_notification_cancel",
+      "breakpoints": true
     }
   ]
 }

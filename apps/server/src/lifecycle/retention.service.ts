@@ -6,6 +6,7 @@ import {
   idempotencyKeys,
   linkTokens,
   notifications,
+  OPEN_STATUSES,
   persons,
   unmappedRecipients,
 } from "../db/schema";
@@ -105,7 +106,7 @@ export class RetentionService {
         and(
           eq(notifications.tenantId, tenantId),
           lt(notifications.createdAt, cutoff),
-          notInArray(notifications.status, ["accepted", "processing"]),
+          notInArray(notifications.status, [...OPEN_STATUSES]),
         ),
       );
 

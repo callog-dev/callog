@@ -19,6 +19,8 @@ destinations: [{ slack: "#alerts" }]
 group: { key: "{{ data.alert }}", window: 15m }
 template: [{ text: "{{ data.alert }} is {{ data.state }}" }]`;
 
+const ADMIN = { personId: null, githubLogin: "octocat" };
+
 describe("grouping repeats (integration)", () => {
   let app: NestFastifyApplication;
   let slack: FakeSlack;
@@ -84,6 +86,28 @@ describe("grouping repeats (integration)", () => {
     const rows = await stored();
     expect(rows.map((r) => r.update)).toEqual([false, true, true]);
     expect(new Set(rows.map((r) => r.threadKey)).size).toBe(1);
+  });
+
+  it("leaves a cancelled repeat out: it edits nothing and is not counted", async () => {
+    await send({ alert: "cpu", state: "high" });
+    const { notificationId } = await app.get(NotificationsService).accept(producer, {
+      route: "alert",
+      data: { alert: "cpu", state: "flapping" },
+      recipients: [],
+      update: false,
+    });
+    await app
+      .get(NotificationsService)
+      .cancel(producer.tenantId, notificationId, { type: "sender" }, ADMIN);
+    expect(
+      await app.get(DeliveryService).deliver(notificationId, { attempt: 1, maxAttempts: 8 }),
+    ).toBe("cancelled");
+    await send({ alert: "cpu", state: "on fire" });
+
+    expect(slack.updated.map((u) => u.message.text)).toEqual(["cpu is on fire"]);
+    expect(slack.updated[0]!.message.blocks!.at(-1)).toMatchObject({
+      elements: [{ text: expect.stringMatching(/^Repeated 2 times, /) }],
+    });
   });
 
   it("keeps different keys apart", async () => {

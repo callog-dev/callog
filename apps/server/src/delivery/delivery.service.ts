@@ -12,8 +12,16 @@ import { and, asc, count, eq, inArray, lt, max, ne, sql } from "drizzle-orm";
 import { MessageGoneError, type Channel, type ChannelId } from "../channels/channel";
 import { ChannelRegistry } from "../channels/channel-registry";
 import { DB, type Db } from "../db/db";
-import { deliveries, notifications, type ProviderMessageRef, type TraceNote } from "../db/schema";
+import {
+  deliveries,
+  isOpen,
+  notifications,
+  OPEN_STATUSES,
+  type ProviderMessageRef,
+  type TraceNote,
+} from "../db/schema";
 import { MetricsService } from "../metrics/metrics.service";
+import { cancelPending } from "../notifications/cancel-pending";
 import { RecipientResolver, type Resolution } from "../routing/recipient-resolver";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
 import { parseDestination, targetKey } from "./destinations";
@@ -79,8 +87,7 @@ export class DeliveryService {
       .where(eq(notifications.id, notificationId));
     if (!notification) return "failed";
     // A retry (NotificationsService.retry) reopens a finished notification first.
-    if (["delivered", "failed", "partially_failed"].includes(notification.status))
-      return notification.status;
+    if (!isOpen(notification.status)) return notification.status;
     if (attempt < maxAttempts && (await this.earlierInThreadPending(notification))) {
       throw new RetryLater("waiting for an earlier notification of the thread");
     }
@@ -110,7 +117,8 @@ export class DeliveryService {
     if (rows.length === 0) {
       rows = await this.createDeliveries(notification, route, config, recipients, places);
     }
-    await this.setStatus(notification.id, "processing");
+    if (!(await this.setStatus(notification.id, "processing")))
+      return this.finishCancelled(notificationId);
 
     const rendered = new Map<string, Promise<Rendered>>();
     let transientError: string | undefined;
@@ -118,6 +126,8 @@ export class DeliveryService {
     // A delivery that falls back adds another one to the end of the queue.
     const queue = rows.filter((d) => d.status === "pending");
     for (const delivery of queue) {
+      // An admin or the sender may cancel while this job runs.
+      if (await this.isCancelled(notificationId)) return this.finishCancelled(notificationId);
       try {
         // A post that stands in for personal copies says whom it is for.
         const standsFor =
@@ -148,12 +158,9 @@ export class DeliveryService {
         const { permanent, message } = classify(err, this.channels.get(delivery.provider));
         // Out of attempts is as final as a refusal: the fallback gets its try in this run.
         const final = permanent || attempt >= maxAttempts;
-        await this.patch(delivery, {
-          attempts: delivery.attempts + 1,
-          lastError: message,
-          ...(final ? { status: "failed" as const } : {}),
-        });
-        if (final) {
+        const change = { attempts: delivery.attempts + 1, lastError: message };
+        if (!final) await this.patch(delivery, change);
+        else if (await this.failPending(delivery, change)) {
           this.metrics.deliveries.inc({ provider: delivery.provider, status: "failed" });
           const next = await this.fallBack(delivery, rows);
           if (next) {
@@ -292,6 +299,31 @@ export class DeliveryService {
     return undefined;
   }
 
+  /** Fails a delivery for good unless it was cancelled meanwhile; says whether it did. */
+  private async failPending(row: Delivery, change: Partial<Delivery>): Promise<boolean> {
+    const [failed] = await this.db
+      .update(deliveries)
+      .set({ ...change, status: "failed" })
+      .where(and(eq(deliveries.id, row.id), eq(deliveries.status, "pending")))
+      .returning({ id: deliveries.id });
+    Object.assign(row, failed ? { ...change, status: "failed" } : { status: "cancelled" });
+    return failed !== undefined;
+  }
+
+  /** A fallback this run added while the cancellation went through is cancelled too. */
+  private async finishCancelled(notificationId: string): Promise<"cancelled"> {
+    await cancelPending(this.db, notificationId);
+    return "cancelled";
+  }
+
+  private async isCancelled(notificationId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ status: notifications.status })
+      .from(notifications)
+      .where(eq(notifications.id, notificationId));
+    return row?.status === "cancelled";
+  }
+
   /** Changes a delivery in the database and in the row this run holds, so they agree. */
   private async patch(row: Delivery, change: Partial<Delivery>): Promise<void> {
     Object.assign(row, change);
@@ -354,7 +386,8 @@ export class DeliveryService {
 
   /**
    * A repeat of a grouped notification edits the group's first message; a footer says how
-   * often it repeated. Counted now, so a retry of an older repeat does not count backwards.
+   * often it repeated. Counted now, so a retry of an older repeat does not count backwards;
+   * a cancelled repeat is not counted.
    */
   private async withRepeats(route: Route, notification: Notification): Promise<Route> {
     if (!notification.groupKey || !notification.threadKey) return route;
@@ -365,6 +398,7 @@ export class DeliveryService {
         and(
           eq(notifications.tenantId, notification.tenantId),
           eq(notifications.threadKey, notification.threadKey),
+          ne(notifications.status, "cancelled"),
         ),
       );
     if (!group?.lastAt || group.count < 2) return route;
@@ -419,7 +453,7 @@ export class DeliveryService {
             notifications.createdAt,
             sql`(select created_at from notifications where id = ${notification.id})`,
           ),
-          inArray(notifications.status, ["accepted", "processing"]),
+          inArray(notifications.status, [...OPEN_STATUSES]),
         ),
       )
       .limit(1);
@@ -475,22 +509,26 @@ export class DeliveryService {
     reason: string,
   ): Promise<NotificationStatus> {
     for (const d of rows.filter((r) => r.status === "pending")) {
-      await this.db
-        .update(deliveries)
-        .set({ status: "failed", lastError: d.lastError ?? reason })
-        .where(eq(deliveries.id, d.id));
+      if (!(await this.failPending(d, { lastError: d.lastError ?? reason }))) continue;
       this.metrics.deliveries.inc({ provider: d.provider, status: "failed" });
     }
     const status = overallStatus(rows);
-    await this.setStatus(notification.id, status);
+    if (!(await this.setStatus(notification.id, status)))
+      return this.finishCancelled(notification.id);
     if (status !== "delivered") {
       this.logger.warn(`Notification ${notification.id} finished as ${status}: ${reason}`);
     }
     return status;
   }
 
-  private async setStatus(id: string, status: NotificationStatus): Promise<void> {
-    await this.db.update(notifications).set({ status }).where(eq(notifications.id, id));
+  /** Never overwrites a cancellation; says whether the status was set. */
+  private async setStatus(id: string, status: NotificationStatus): Promise<boolean> {
+    const [row] = await this.db
+      .update(notifications)
+      .set({ status })
+      .where(and(eq(notifications.id, id), ne(notifications.status, "cancelled")))
+      .returning({ id: notifications.id });
+    return row !== undefined;
   }
 }
 

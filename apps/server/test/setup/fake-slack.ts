@@ -75,6 +75,8 @@ export class FakeSlack {
   deletedTs = new Set<string>();
   /** Errors thrown by the next postMessage calls, in order. */
   failures: SlackApiError[] = [];
+  /** Runs while a postMessage call is in flight, before it lands. */
+  beforePost: (() => Promise<void>) | undefined;
   /** Socket Mode clients created, newest last; errors their next starts throw. */
   sockets: FakeSlackSocket[] = [];
   socketFailures: Error[] = [];
@@ -107,14 +109,16 @@ export class FakeSlack {
         }),
       listUsergroups: () => guard(() => this.usergroups),
       openDm: (userId) => guard(() => `D${userId}`),
-      postMessage: (channel, message) =>
-        guard(() => {
+      postMessage: async (channel, message) => {
+        await this.beforePost?.();
+        return guard(() => {
           const failure = this.failures.shift();
           if (failure) throw failure;
           const ts = `1700000000.${String(this.posted.length + 1).padStart(6, "0")}`;
           this.posted.push({ channel, message, ts });
           return { channel, ts };
-        }),
+        });
+      },
       updateMessage: (channel, ts, message) =>
         guard(() => {
           if (this.deletedTs.has(ts)) throw new SlackApiError("message_not_found");
