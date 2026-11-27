@@ -1,5 +1,5 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DB, type Db } from "../src/db/db";
 import {
@@ -11,9 +11,12 @@ import {
   tenants,
   unmappedRecipients,
 } from "../src/db/schema";
+import { PlaceChecks } from "../src/channels/place-checks";
 import { AppAccessService } from "../src/github/app-access.service";
 import { PeopleService } from "../src/identity/people.service";
+import { SlackConnectionsService } from "../src/slack/slack-connections.service";
 import type { FakeGithub } from "./setup/fake-github";
+import { GOOD_SLACK_TOKEN } from "./setup/fake-slack";
 import { createTestApp, createTenant, activateConfig } from "./setup/test-app";
 import { webLogin } from "./setup/web-login";
 
@@ -86,7 +89,7 @@ describe("admin web API (integration)", () => {
   });
 
   const call = (
-    method: "GET" | "POST" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     url: string,
     payload?: object,
     cookie = adminCookie,
@@ -629,6 +632,37 @@ teams:
     ]);
   });
 
+  const placeCheckJobs = async () =>
+    (
+      await db.execute(
+        sql`select count(*)::int as count from graphile_worker.jobs
+            where task_identifier = 'places.check'`,
+      )
+    ).rows[0]!.count;
+
+  it("shows what is wrong with a place's Slack channel", async () => {
+    await app.get(SlackConnectionsService).connect(tenantId, GOOD_SLACK_TOKEN);
+    await activateConfig(
+      app,
+      tenantId,
+      { "places.yaml": 'places: { feed: { slack: "#alerts" }, gone: { slack: "#nope" } }' },
+      "def",
+    );
+    await app.get(PlaceChecks).check(tenantId);
+
+    expect((await call("GET", "/api/admin/places")).json()).toEqual([
+      { name: "feed", channel: "slack", room: "#alerts", routes: [], defaultFor: [] },
+      {
+        name: "gone",
+        channel: "slack",
+        room: "#nope",
+        routes: [],
+        defaultFor: [],
+        issue: { level: "error", message: expect.stringContaining("#nope was not found") },
+      },
+    ]);
+  });
+
   it("manages hooks", async () => {
     const created = (
       await call("POST", "/api/admin/hooks", { name: "grafana", route: "r" })
@@ -657,5 +691,28 @@ teams:
     expect((await call("POST", "/api/admin/config/reload")).json()).toMatchObject({
       status: "valid",
     });
+  });
+
+  it("checks the places when a messenger is connected", async () => {
+    await db.execute(sql`delete from graphile_worker._private_jobs`);
+
+    const res = await call("PUT", "/api/admin/slack", {
+      botToken: GOOD_SLACK_TOKEN,
+      appToken: "xapp-test",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(await placeCheckJobs()).toBe(1);
+  });
+
+  it("checks the places again when the reloaded config has not changed", async () => {
+    github.push("acme/notify-config", { "places.yaml": 'places: { feed: { slack: "#alerts" } }' });
+    await call("POST", "/api/admin/config/reload");
+    await db.execute(sql`delete from graphile_worker._private_jobs`);
+
+    expect((await call("POST", "/api/admin/config/reload")).json()).toMatchObject({
+      status: "unchanged",
+    });
+    expect(await placeCheckJobs()).toBe(1);
   });
 });

@@ -26,6 +26,13 @@ export interface ClassifiedError {
   retryAfterSeconds?: number;
 }
 
+/** What is wrong with a place, for the admin. */
+export interface PlaceIssue {
+  /** An error stops messages to the place; a warning does not, or not for long. */
+  level: "error" | "warning";
+  message: string;
+}
+
 /** Thrown by `Channel.edit` when the message to edit no longer exists. */
 export class MessageGoneError extends Error {
   constructor(message: string) {
@@ -44,6 +51,16 @@ export interface Channel<Id extends ChannelId = ChannelId, Message = unknown> {
 
   /** Canonical spelling of a place, so the same place is delivered to once. */
   normalizePlace?(place: string): string;
+
+  /**
+   * Asks the messenger whether a place of the config can be posted to. `transient` when
+   * the answer could not be had now and asking again later may give it. Channels that
+   * cannot tell leave this out.
+   */
+  checkPlace?(
+    tenantId: string,
+    place: string,
+  ): Promise<(PlaceIssue & { transient?: boolean }) | undefined>;
 
   /** Minimum gap between two messages to the destination, in milliseconds. */
   minIntervalMs(to: Destination): number;

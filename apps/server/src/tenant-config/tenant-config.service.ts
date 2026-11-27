@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { Config, ConfigIssue } from "@callog/config-schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+import type { PlaceIssue } from "../channels/channel";
 import { DB, type Db, type Tx } from "../db/db";
 import { configVersions } from "../db/schema";
 
@@ -8,6 +9,8 @@ export interface ActiveConfig {
   versionId: string;
   commitSha: string;
   config: Config;
+  /** What the last check of the places found wrong, by place name. */
+  placeIssues: Record<string, PlaceIssue>;
 }
 
 export type ConfigVersion = typeof configVersions.$inferSelect;
@@ -77,6 +80,16 @@ export class TenantConfigService {
     });
   }
 
+  /** Kept with the version: the places are the ones this version of the config names. */
+  async setPlaceIssues(versionId: string, issues: Record<string, PlaceIssue>): Promise<void> {
+    await this.db
+      .update(configVersions)
+      .set({
+        errors: sql`coalesce(${configVersions.errors}, '{}'::jsonb) || ${JSON.stringify({ places: issues })}::jsonb`,
+      })
+      .where(eq(configVersions.id, versionId));
+  }
+
   async recordInvalid(
     tenantId: string,
     commitSha: string,
@@ -92,5 +105,11 @@ export class TenantConfigService {
 }
 
 function toActive(version: ConfigVersion): ActiveConfig {
-  return { versionId: version.id, commitSha: version.commitSha, config: version.config as Config };
+  const stored = version.errors as { places?: Record<string, PlaceIssue> } | null;
+  return {
+    versionId: version.id,
+    commitSha: version.commitSha,
+    config: version.config as Config,
+    placeIssues: stored?.places ?? {},
+  };
 }

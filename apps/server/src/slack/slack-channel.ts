@@ -12,9 +12,10 @@ import {
   type ClassifiedError,
   type Destination,
   type MessageRef,
+  type PlaceIssue,
 } from "../channels/channel";
 import { SlackApiError } from "./slack-api";
-import { SLACK_CHANNEL_ID, SlackSender } from "./slack-sender";
+import { SLACK_CHANNEL_ID, slackChannelName, SlackSender } from "./slack-sender";
 
 /** Slack errors worth retrying; everything else from Slack is a permanent failure. */
 const TRANSIENT = new Set([
@@ -36,6 +37,40 @@ export class SlackChannel implements Channel<"slack", SlackMessage> {
   /** `fe-alerts` and `#fe-alerts` are the same channel; ids are kept as is. */
   normalizePlace(place: string): string {
     return SLACK_CHANNEL_ID.test(place) || place.startsWith("#") ? place : `#${place}`;
+  }
+
+  /** A place given by a channel name is looked up; one given by an id is taken as it is. */
+  async checkPlace(
+    tenantId: string,
+    place: string,
+  ): Promise<(PlaceIssue & { transient?: boolean }) | undefined> {
+    const name = slackChannelName(place);
+    if (!name) return undefined;
+    try {
+      await this.sender.checkChannel(tenantId, name);
+      return undefined;
+    } catch (err) {
+      if (!(err instanceof SlackApiError)) throw err;
+      const channel = `Slack channel #${name}`;
+      switch (err.code) {
+        // Nothing to check against; connecting the workspace checks the places again.
+        case "not_connected":
+          return undefined;
+        case "channel_not_found":
+          return {
+            level: "error",
+            message: `${channel} was not found: it does not exist, was renamed or archived, or is private and the bot is not in it.`,
+          };
+        case "ratelimited":
+          return {
+            level: "warning",
+            message: `${channel} is not checked yet: Slack's rate limit got in the way. It will be checked again shortly.`,
+            transient: true,
+          };
+        default:
+          return { level: "warning", message: `${channel} could not be checked: ${err.code}.` };
+      }
+    }
   }
 
   /** Slack allows about one message per second per channel. */

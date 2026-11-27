@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { MapPin } from "lucide-react";
+import { ISSUE_LEVEL_TEXT } from "@/components/config-issues";
 import { DataTable, type ColumnDef } from "@/components/data-table";
 import { ProviderBadge } from "@/components/provider-badge";
 import { RouteLink } from "@/components/route-parts";
@@ -7,6 +8,7 @@ import { EmptyState, ErrorState } from "@/components/states";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { adminApi, type PlaceInfo } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 /** Places from places.yaml: the room behind each name, and what uses it. Read-only. */
 export function PlacesTab() {
@@ -56,8 +58,15 @@ const COLUMNS: ColumnDef<PlaceInfo>[] = [
   {
     accessorKey: "room",
     header: "Room",
-    cell: ({ row }) => (
-      <ProviderBadge provider={row.original.channel}>{row.original.room}</ProviderBadge>
+    cell: ({ row: { original: place } }) => (
+      <>
+        <ProviderBadge provider={place.channel}>{place.room}</ProviderBadge>
+        {place.issue && (
+          <p className={cn("mt-1 text-xs", ISSUE_LEVEL_TEXT[place.issue.level])}>
+            {place.issue.message}
+          </p>
+        )}
+      </>
     ),
   },
   {
