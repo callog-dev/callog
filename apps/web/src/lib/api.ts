@@ -134,6 +134,21 @@ export interface NotificationRow {
   deliveries: DeliverySummary[];
 }
 
+/** A room, or someone's direct messages, in one channel. */
+export interface TargetRoom {
+  provider: "slack" | "telegram";
+  kind: "place" | "person";
+  destination: string;
+  /** A human-readable name (Telegram chat title) when the server knows one. */
+  label?: string;
+}
+
+/** Where a test of a route is posted, whom a personal copy is for, and where it goes if that fails. */
+export interface TestTarget extends TargetRoom {
+  for: TracedRecipient[];
+  fallbacks: TargetRoom[];
+}
+
 /** Someone a trace talks about: the ref, and the person's name when Callog knows them. */
 export interface TracedRecipient {
   ref: string;
@@ -420,10 +435,17 @@ export const adminApi = {
       `/api/admin/notifications?${q}`,
     );
   },
-  testRoute: (routeId: string) =>
+  testTargets: (routeId: string) =>
+    request<{ configVersion: string; targets: TestTarget[] }>(
+      "GET",
+      `/api/admin/routes/${encodeURIComponent(routeId)}/test`,
+    ),
+  /** `configVersion` is the config whose places the admin confirmed; another one is refused. */
+  testRoute: (routeId: string, configVersion: string) =>
     request<{ notificationId: string }>(
       "POST",
       `/api/admin/routes/${encodeURIComponent(routeId)}/test`,
+      { configVersion },
     ),
   notificationCount: (params: Record<string, string | undefined> & { after: string }) =>
     request<{ count: number }>(

@@ -111,7 +111,7 @@ function stepList(steps: Onboarding["steps"], open: (dialog: Dialog) => void) {
       title: "Send a first notification",
       done: steps.firstNotification.done,
       hint: steps.config.done
-        ? "Send a route's example to yourself, then copy the workflow step."
+        ? "Post a route's example where the route delivers (you confirm the places first), then copy the workflow step."
         : "Needs a loaded config repo.",
       action: (
         <Button size="sm" disabled={!steps.config.done} onClick={() => open("test")}>

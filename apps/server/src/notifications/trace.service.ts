@@ -70,7 +70,7 @@ export class TraceService {
   }
 
   /** `person:<id>` refs become names; any other ref is shown by its visible part. */
-  private async names(tenantId: string, refs: Ref[]): Promise<(ref: Ref) => TracedRecipient> {
+  async names(tenantId: string, refs: Ref[]): Promise<(ref: Ref) => TracedRecipient> {
     const ids = [
       ...new Set(refs.map(parseRef).flatMap((r) => (r.kind === "person" ? [r.value] : []))),
     ];

@@ -2,6 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleAlert, Copy, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/confirm";
+import { ProviderBadge } from "@/components/provider-badge";
+import { DestinationBadge } from "@/components/route-parts";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,7 +22,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { adminApi, api, type NotificationDetails } from "@/lib/api";
+import {
+  adminApi,
+  api,
+  type NotificationDetails,
+  type TargetRoom,
+  type TestTarget,
+} from "@/lib/api";
 
 /** The release of the GitHub Action the snippet pins; bump it with every release. */
 const ACTION_REF = "callog-dev/callog/packages/action@v0.5.1";
@@ -39,7 +48,7 @@ export function TestNotificationDialog({
   const [sent, setSent] = useState<string>();
   const client = useQueryClient();
   const send = useMutation({
-    mutationFn: () => adminApi.testRoute(routeId!),
+    mutationFn: (configVersion: string) => adminApi.testRoute(routeId!, configVersion),
     onSuccess: ({ notificationId }) => setSent(notificationId),
     onError: (e) => toast.error(e.message),
   });
@@ -56,6 +65,32 @@ export function TestNotificationDialog({
 
   const first = routes.data?.routes[0]?.id;
   const selected = routeId ?? first;
+  const confirm = useConfirm();
+  const [asking, setAsking] = useState(false);
+  const confirmAndSend = async () => {
+    setAsking(true);
+    // Asked on every press: people link accounts and the config changes in between.
+    const preview = await client
+      .fetchQuery({
+        queryKey: ["admin", "test-targets", selected],
+        queryFn: () => adminApi.testTargets(selected!),
+        staleTime: 0,
+      })
+      .catch((e: Error) => void toast.error(e.message))
+      .finally(() => setAsking(false));
+    if (!preview) return;
+    const where = preview.targets;
+    const confirmed = await confirm({
+      title: `Send a test of ${selected}?`,
+      description:
+        where.length > 0
+          ? "A real notification is posted to:"
+          : "The route has nowhere to post it: the notification will fail.",
+      body: where.length > 0 && <Targets targets={where} />,
+      action: "Send",
+    });
+    if (confirmed) send.mutate(preview.configVersion);
+  };
   useEffect(() => {
     if (!routeId && first) setRouteId(first);
   }, [routeId, first]);
@@ -66,7 +101,8 @@ export function TestNotificationDialog({
         <DialogHeader>
           <DialogTitle>Send a test notification</DialogTitle>
           <DialogDescription>
-            The route's first example goes through the real pipeline and mentions you.
+            The route's first example goes through the real pipeline: it is posted wherever the
+            route delivers, and mentions you if the route mentions its recipients.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 text-sm">
@@ -93,10 +129,10 @@ export function TestNotificationDialog({
               </Select>
             </div>
             <Button
-              disabled={!selected || send.isPending || (Boolean(sent) && !done)}
-              onClick={() => send.mutate()}
+              disabled={!selected || asking || send.isPending || (Boolean(sent) && !done)}
+              onClick={confirmAndSend}
             >
-              {sent ? "Send again" : "Send"}
+              {sent ? "Send again" : "Send test"}
             </Button>
           </div>
           {result.data && <Outcome notification={result.data} />}
@@ -111,6 +147,44 @@ export function TestNotificationDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Where the test is about to be posted, for the admin to confirm. */
+function Targets({ targets }: { targets: TestTarget[] }) {
+  return (
+    <ul className="space-y-1 text-sm">
+      {targets.map((t) => (
+        <li
+          key={`${t.provider}${t.kind}${t.destination}`}
+          className="flex flex-wrap items-center gap-2"
+        >
+          <Room room={t} />
+          {t.for.length > 0 && (
+            <span className="text-muted-foreground">
+              {t.kind === "person" ? "a personal copy for" : "in place of a personal copy for"}{" "}
+              {t.for.map((recipient) => recipient.name).join(", ")}
+            </span>
+          )}
+          {t.fallbacks.length > 0 && (
+            <span className="inline-flex flex-wrap items-center gap-1 text-muted-foreground">
+              if that fails:
+              {t.fallbacks.map((f) => (
+                <Room key={`${f.provider}${f.kind}${f.destination}`} room={f} />
+              ))}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Room({ room }: { room: TargetRoom }) {
+  return room.kind === "person" ? (
+    <ProviderBadge provider={room.provider} />
+  ) : (
+    <DestinationBadge {...room} />
   );
 }
 

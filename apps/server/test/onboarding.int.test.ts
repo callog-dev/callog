@@ -182,6 +182,72 @@ examples: [{ data: { text: Hi } }]`,
     expect((await call("POST", "/api/admin/routes/nope/test", cookie)).statusCode).toBe(404);
   });
 
+  it("says where a test would be posted, without sending it", async () => {
+    const { personId } = await app.get(PeopleService).linkAccounts(tenantId, {
+      displayName: "Olga",
+      accounts: [
+        { provider: "slack", externalId: "UOLGA", source: "sync", confidence: "verified" },
+        {
+          provider: "github",
+          externalId: String(owner.id),
+          handle: owner.login,
+          source: "oauth",
+          confidence: "verified",
+        },
+      ],
+    });
+    await adminRequest("PUT", `/admin/tenants/${tenantId}/slack`, { botToken: GOOD_SLACK_TOKEN });
+    await activateConfig(app, tenantId, {
+      "places.yaml": `places: { general: { slack: "#general" } }`,
+      "routes/hello.yaml": `
+id: hello
+destinations: [{ place: general }, { slack: "#alerts" }]
+template: [{ text: hi }]`,
+      "routes/personal.yaml": `
+id: personal
+dm: true
+default_place: general
+template: [{ text: hi }]`,
+    });
+    const cookie = await webLogin(app, githubOAuthUsers, owner);
+    slack.posted = [];
+
+    const rooms = await call("GET", "/api/admin/routes/hello/test", cookie);
+    expect(rooms.statusCode).toBe(200);
+    const { configVersion } = rooms.json();
+    expect(rooms.json()).toEqual({
+      configVersion,
+      targets: [
+        { provider: "slack", kind: "place", destination: "#general", for: [], fallbacks: [] },
+        { provider: "slack", kind: "place", destination: "#alerts", for: [], fallbacks: [] },
+      ],
+    });
+    // With a copy of their own, the admin is reached: the default place gets nothing.
+    expect((await call("GET", "/api/admin/routes/personal/test", cookie)).json()).toEqual({
+      configVersion,
+      targets: [
+        {
+          provider: "slack",
+          kind: "person",
+          destination: "UOLGA",
+          for: [{ ref: `person:${personId}`, name: "Olga" }],
+          fallbacks: [{ provider: "slack", kind: "place", destination: "#general" }],
+        },
+      ],
+    });
+    // A test confirmed against another config is refused.
+    const stale = await call("POST", "/api/admin/routes/hello/test", cookie, {
+      configVersion: "00000000-0000-4000-8000-000000000000",
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(slack.posted).toEqual([]);
+    expect(await db.select().from(notifications)).toEqual([]);
+    expect(
+      (await call("POST", "/api/admin/routes/hello/test", cookie, { configVersion })).statusCode,
+    ).toBe(201);
+    expect((await call("GET", "/api/admin/routes/nope/test", cookie)).statusCode).toBe(404);
+  });
+
   it("walks the checklist from a fresh install to complete", async () => {
     const cookie = await webLogin(app, githubOAuthUsers, owner);
     const checklist = async () => (await call("GET", "/api/admin/onboarding", cookie)).json();

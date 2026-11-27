@@ -13,12 +13,23 @@ import { useMuteToggle } from "@/lib/mutes";
 export function RouteDestinations({ route }: { route: RouteSummary }) {
   return route.destinations.map((d) => (
     <span key={`${d.provider}${d.destination}`} className="inline-flex items-center gap-1">
-      <ProviderBadge provider={d.provider} title={d.label ? d.destination : undefined}>
-        {d.label ?? d.destination}
-      </ProviderBadge>
+      <DestinationBadge {...d} />
       {d.fallback && <span className="text-muted-foreground">when it reaches nobody else</span>}
     </span>
   ));
+}
+
+/** A room by its name; one known only by an id shows its title, with the id on hover. */
+export function DestinationBadge({
+  provider,
+  destination,
+  label,
+}: Pick<RouteSummary["destinations"][number], "provider" | "destination" | "label">) {
+  return (
+    <ProviderBadge provider={provider} title={label ? destination : undefined}>
+      {label ?? destination}
+    </ProviderBadge>
+  );
 }
 
 /** The repositories (GitHub Actions) and API keys allowed to send to a route. */
