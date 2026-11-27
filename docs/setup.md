@@ -258,6 +258,12 @@ this one file. The bot posts to public Slack channels without being invited; inv
 private channel a place or a team uses, and add the Telegram bot to the groups behind
 Telegram places.
 
+A Slack place is a channel name or a channel ID (`slack: "C0123ABCDEF"`, from the channel's
+details in Slack). A name is looked up among the channels the bot is a member of, then among
+all public channels of the workspace. In a workspace with thousands of channels the second
+lookup takes many requests against Slack's rate limit, so the first notification to a channel
+the bot is not in can take a while: invite the bot to the channel, or use the ID.
+
 **Hooks.** A system that sends its own webhooks cannot build Callog's request, and often cannot
 hold an API key. In Settings → Hooks an admin creates a hook for one route and gets its URL,
 shown once. Whatever JSON object is posted there becomes the notification's `data`; the route

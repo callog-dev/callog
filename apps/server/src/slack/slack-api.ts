@@ -14,6 +14,16 @@ export interface SlackChannel {
   name: string;
 }
 
+/** Which channels a listing covers: the ones the bot is a member of, or every public one. */
+export type SlackChannelScope = "member" | "public";
+
+export interface SlackChannelPage {
+  /** May be short or empty with more pages still to come. */
+  channels: SlackChannel[];
+  /** Absent on the last page. */
+  nextCursor: string | undefined;
+}
+
 export interface SlackUsergroup {
   id: string;
   handle: string;
@@ -43,7 +53,8 @@ export interface SlackApi {
    */
   checkAppToken(): Promise<void>;
   listUsers(): Promise<SlackUser[]>;
-  listChannels(): Promise<SlackChannel[]>;
+  /** One page of unarchived channels; pass the previous page's `nextCursor` to go on. */
+  listChannelPage(scope: SlackChannelScope, cursor?: string): Promise<SlackChannelPage>;
   listUsergroups(): Promise<SlackUsergroup[]>;
   openDm(userId: string): Promise<string>;
   postMessage(channel: string, message: SlackMessagePayload): Promise<SlackPostResult>;
@@ -83,6 +94,8 @@ export const SLACK_API_FACTORY = Symbol("SLACK_API_FACTORY");
 
 export const createSlackApi: SlackApiFactory = (botToken) => new WebClientSlackApi(botToken);
 
+/** The most Slack returns per page: fewer requests against the per-minute rate limit. */
+const CHANNEL_PAGE_SIZE = 999;
 /** A hung request must not hold a worker slot. */
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -133,19 +146,24 @@ class WebClientSlackApi implements SlackApi {
     });
   }
 
-  listChannels() {
+  listChannelPage(scope: SlackChannelScope, cursor?: string) {
     return call(async () => {
-      const channels: SlackChannel[] = [];
-      for await (const page of this.client.paginate("conversations.list", {
-        limit: 200,
-        exclude_archived: true,
-        types: "public_channel,private_channel",
-      })) {
-        for (const c of (page as { channels?: { id: string; name: string }[] }).channels ?? []) {
-          channels.push({ id: c.id, name: c.name });
-        }
-      }
-      return channels;
+      const page = { limit: CHANNEL_PAGE_SIZE, cursor, exclude_archived: true };
+      // users.conversations is in a higher rate limit tier than conversations.list and
+      // returns only what the bot is in, private channels included.
+      const res =
+        scope === "member"
+          ? await this.client.users.conversations({
+              ...page,
+              types: "public_channel,private_channel",
+            })
+          : await this.client.conversations.list({ ...page, types: "public_channel" });
+      return {
+        channels: (res.channels ?? []).flatMap((c) =>
+          c.id && c.name ? [{ id: c.id, name: c.name }] : [],
+        ),
+        nextCursor: res.response_metadata?.next_cursor || undefined,
+      };
     });
   }
 

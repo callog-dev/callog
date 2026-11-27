@@ -6,6 +6,21 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 [docs/upgrade.md](docs/upgrade.md). Every release has an
 **Operator actions** section, even when it says "none".
 
+## [Unreleased]
+
+### Fixed
+
+- A notification to a Slack channel given by name no longer fails with `slack: ratelimited`
+  in a workspace with thousands of channels. The name is looked up among the channels the bot
+  is a member of first, and only then among all public channels, stopping at the page that
+  has it. A rate limit from Slack is waited out instead of failing the delivery, and a retry
+  continues the listing where it stopped instead of starting over.
+
+### Operator actions
+
+None. In a large workspace, inviting the bot to the channels it posts to (or giving a place
+the channel ID instead of its name) keeps the lookup to a single request.
+
 ## [0.5.1]
 
 ### Added
