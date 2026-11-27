@@ -13,7 +13,7 @@ There are no logins or emails here: people link their accounts in Callog.
 
 ## First steps
 
-1. In `places.yaml`, change `#general` to a channel of yours.
+1. In `places.yaml`, set the channel of the `updates` place. Until then Validate fails.
 2. Open a pull request: the Validate workflow checks it and comments a preview of the message.
 3. Merge it and send a test notification from Callog → Admin.
 

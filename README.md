@@ -70,6 +70,7 @@ started** checklist on the Overview page covers the rest:
   routes, teams, and places — rooms by name, so that routes and senders say `deploys` and one
   file says which Slack channel that is. No logins or emails. Every push to its default branch
   is validated and loaded; an invalid config is rejected and the previous one stays active.
+  Set the channel of the template's place in `places.yaml` first: until then it is rejected.
 - **A first notification** — post a route's example to the places the route delivers to (the
   page lists them and asks before it sends; the message mentions you) and copy the
   [GitHub Action](packages/action/README.md) step that sends it from a workflow. Its `url:` must

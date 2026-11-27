@@ -233,6 +233,60 @@ recipients: ["githb:octocat", "place:nowhere", "github:{{ data.x }}", "team:sre"
       );
       expect(errors[0]).toMatchObject({ file: "places.yaml", path: ["places", "a"] });
     });
+
+    it("rejects the starter placeholder until a channel is set", () => {
+      const errors = errorsOf(
+        parseConfigTree({
+          "places.yaml": 'places: { updates: { slack: "<channel ID or #name>" } }',
+        }),
+      );
+      expect(errors).toEqual([
+        {
+          file: "places.yaml",
+          path: ["places", "updates", "slack"],
+          message:
+            "set a channel: replace the placeholder with a Slack channel ID (C0123ABCDEF) or #name, or a Telegram chat id",
+        },
+      ]);
+    });
+
+    it("does not call places unknown when places.yaml itself is invalid", () => {
+      const errors = errorsOf(
+        parseConfigTree({
+          "places.yaml": "places: { updates: { email: x } }",
+          "routes/a.yaml": minimalRoute("a").replace('{ slack: "#x" }', "{ place: updates }"),
+        }),
+      );
+      expect(errors.map((e) => e.file)).toEqual(["places.yaml"]);
+    });
+
+    it("rejects the placeholder wherever a channel is named", () => {
+      const errors = errorsOf(
+        parseConfigTree({
+          "routes/a.yaml": minimalRoute("a").replace('"#x"', '"<channel ID or #name>"'),
+          "teams.yaml": 'teams: { fe: { telegram_chat: "<channel ID or #name>" } }',
+        }),
+      );
+      expect(errors.map((e) => [e.file, e.path.join("."), e.message.split(":")[0]])).toEqual([
+        ["teams.yaml", "teams.fe.telegram_chat", "set a channel"],
+        ["routes/a.yaml", "destinations.0.slack", "set a channel"],
+      ]);
+    });
+
+    it("does not call teams unknown when teams.yaml itself is invalid", () => {
+      const errors = errorsOf(
+        parseConfigTree({
+          "teams.yaml": 'teams: { fe: { slack_channel: "<channel ID or #name>" } }',
+          "routes/a.yaml": minimalRoute("a").replace('{ slack: "#x" }', "{ team: fe }"),
+        }),
+      );
+      expect(errors.map((e) => e.file)).toEqual(["teams.yaml"]);
+    });
+
+    it("accepts a place that means #general", () => {
+      const result = parseConfigTree({ "places.yaml": 'places: { all: { slack: "#general" } }' });
+      expect(result.ok).toBe(true);
+    });
   });
 
   it("keeps the built-in route out of the config", () => {

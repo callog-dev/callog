@@ -264,6 +264,11 @@ all public channels of the workspace. In a workspace with thousands of channels 
 lookup takes many requests against Slack's rate limit, so the first notification to a channel
 the bot is not in can take a while: invite the bot to the channel, or use the ID.
 
+A config repo created from the template starts with one place, `updates`, whose channel is the
+placeholder `<channel ID or #name>`. A config with the placeholder does not pass validation —
+`notify validate` and the server report `places.updates.slack: set a channel` — so the first
+test is never posted to a channel nobody picked. Replace it with the channel ID or name.
+
 The names are looked up when a config is loaded. A place whose channel was not found is listed
 on the Config page and in Settings → Places; after fixing it in Slack (inviting the bot,
 unarchiving the channel) or in the config, press **Load now** to check again.

@@ -9,7 +9,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { PLACE_PLACEHOLDER } from "@callog/config-schema";
 import { describe, expect, it } from "vitest";
+import { readConfigDir } from "./files";
 import { send } from "./send";
 import { validate } from "./validate";
 
@@ -43,9 +45,19 @@ describe("notify validate", () => {
     expect(report.summary).toBe("✔ Config is valid: 1 route, 1 team");
   });
 
-  it("accepts the config repo template", () => {
+  it("rejects the config repo template until its place has a channel", () => {
     const report = validate({ dir: TEMPLATE });
-    expect(report.ok).toBe(true);
+    expect(report.lines).toEqual([
+      "✖ places.yaml › places.updates.slack: set a channel: replace the placeholder with a Slack channel ID (C0123ABCDEF) or #name, or a Telegram chat id",
+      "✖ Config has 1 error — the server would keep the previous version",
+    ]);
+  });
+
+  it("accepts the config repo template once its place has a channel", () => {
+    const template = readConfigDir(TEMPLATE);
+    const places = template["places.yaml"]!.replace(PLACE_PLACEHOLDER, "C0123ABCDEF");
+
+    const report = validate({ dir: repo({ ...template, "places.yaml": places }) });
     expect(report.summary).toBe("✔ Config is valid: 1 route, 0 teams");
   });
 

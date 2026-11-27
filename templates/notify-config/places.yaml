@@ -1,8 +1,13 @@
-# Places are rooms with a name. Routes and senders say `general`; only this file says which
+# Places are rooms with a name. Routes and senders say `updates`; only this file says which
 # Slack channel (or Telegram chat) that is, so moving a place is a one-line change here.
 #
+# Set the channel below: until then the config does not pass validation. In a large workspace
+# prefer the channel ID (C0123ABCDEF, in the channel's details in Slack) to a #name, which
+# takes many Slack API requests to look up.
+#
 # places:
-#   deploys: { slack: "#deploys" }
+#   deploys: { slack: "C0123ABCDEF" }
+#   alerts: { slack: "#alerts" }
 #   oncall: { telegram: "-1001234567890" }
 places:
-  general: { slack: "#general" }
+  updates: { slack: "<channel ID or #name>" }
