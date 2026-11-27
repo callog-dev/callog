@@ -3,22 +3,33 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DB, type Db } from "../db/db";
 import { identities, type Confidence, type IdentitySource, USABLE_CONFIDENCE } from "../db/schema";
 import { GithubAppService, type InstallationOctokit } from "../github/github-app.service";
+import { TenantConfigService } from "../tenant-config/tenant-config.service";
 import { TenantsService } from "../tenants/tenants.service";
 import { matchCommitAuthors, type CommitSample } from "./commit-heuristic";
 import { PeopleService, type AttachOutcome } from "./people.service";
+import { workEmailResolver } from "./work-emails";
 
-/** How far back and how deep the commit heuristic looks per repository. */
-const COMMITS_SINCE_DAYS = 90;
+/**
+ * How far back and how deep the commit heuristic looks per repository. Only the recent
+ * commits make a link usable; older ones still suggest it, so people who commit rarely are
+ * found too. A quiet repository costs one request either way.
+ */
+const COMMITS_SINCE_DAYS = 365;
+const RECENT_COMMITS_DAYS = 90;
 const MAX_COMMIT_PAGES_PER_REPO = 5;
+const DAY_MS = 86_400_000;
 const PAGE = 100;
 
 export interface GithubSyncReport {
   members: number;
   /** Members linked to a person with `verified` or `high` confidence (usable for mentions). */
   matched: number;
+  /** Members with no link at all (suggested ones are in `suggestedMembers`). */
   unmatched: string[];
   /** Links waiting for admin confirmation. */
   suggested: number;
+  /** Members whose only link is waiting for admin confirmation. */
+  suggestedMembers: string[];
   linkedBySource: Partial<Record<IdentitySource, number>>;
   conflicts: number;
   /** `false` when the org has no verified-domain emails (needs GitHub Enterprise Cloud). */
@@ -62,6 +73,7 @@ export class GithubIdentitySync {
     @Inject(DB) private readonly db: Db,
     private readonly githubApp: GithubAppService,
     private readonly tenants: TenantsService,
+    private readonly configs: TenantConfigService,
     private readonly people: PeopleService,
   ) {}
 
@@ -78,6 +90,7 @@ export class GithubIdentitySync {
       matched: 0,
       unmatched: [],
       suggested: 0,
+      suggestedMembers: [],
       linkedBySource: {},
       conflicts: 0,
       verifiedDomainEmails: false,
@@ -105,23 +118,38 @@ export class GithubIdentitySync {
         }),
       );
 
-    const personByEmail = await this.workEmails(tenantId);
+    const [personByEmail, config] = await Promise.all([
+      this.workEmails(tenantId),
+      this.configs.getActive(tenantId),
+    ]);
+    const resolve = workEmailResolver(
+      new Set(personByEmail.keys()),
+      // Configs stored before email_domains existed lack the key.
+      config?.config.config.email_domains ?? [],
+    );
 
     // 1. Verified domain emails (GitHub Enterprise Cloud with a verified domain).
     for (const { login, databaseId, emails } of await this.verifiedDomainEmails(octokit, org)) {
       for (const email of emails) {
         report.verifiedDomainEmails = true;
-        const personId = personByEmail.get(email.toLowerCase());
-        if (personId)
-          await attachGithub(personId, { login, id: databaseId }, "verified_domain", "verified");
+        const [known, ...others] = resolve(email);
+        if (known && others.length === 0)
+          await attachGithub(
+            personByEmail.get(known)!,
+            { login, id: databaseId },
+            "verified_domain",
+            "verified",
+          );
       }
     }
 
     // 3. Commit heuristic. History outlives membership: a member removed from the org
     // (and unlinked) must not be linked back by their old commits.
     const memberIds = new Set(members.map((m) => m.id));
-    const samples = await this.commitSamples(octokit);
-    for (const match of matchCommitAuthors(samples, new Set(personByEmail.keys()))) {
+    const now = Date.now();
+    const samples = await this.commitSamples(octokit, new Date(now - COMMITS_SINCE_DAYS * DAY_MS));
+    const recentSince = new Date(now - RECENT_COMMITS_DAYS * DAY_MS);
+    for (const match of matchCommitAuthors(samples, resolve, recentSince)) {
       if (!memberIds.has(match.githubId)) continue;
       const personId = personByEmail.get(match.email)!;
       await attachGithub(
@@ -137,13 +165,13 @@ export class GithubIdentitySync {
       .select({ externalId: identities.externalId, confidence: identities.confidence })
       .from(identities)
       .where(and(eq(identities.tenantId, tenantId), eq(identities.provider, "github")));
-    const usable = new Set(
-      linked.filter((l) => l.confidence !== "suggested").map((l) => l.externalId),
-    );
+    const confidenceById = new Map(linked.map((l) => [l.externalId, l.confidence]));
     report.suggested = linked.filter((l) => l.confidence === "suggested").length;
     for (const member of members) {
-      if (usable.has(String(member.id))) report.matched++;
-      else report.unmatched.push(member.login);
+      const confidence = confidenceById.get(String(member.id));
+      if (!confidence) report.unmatched.push(member.login);
+      else if (confidence === "suggested") report.suggestedMembers.push(member.login);
+      else report.matched++;
     }
 
     this.logger.log(`GitHub identity sync for tenant ${tenantId}: ${JSON.stringify(report)}`);
@@ -223,8 +251,7 @@ export class GithubIdentitySync {
     return result;
   }
 
-  private async commitSamples(octokit: InstallationOctokit): Promise<CommitSample[]> {
-    const since = new Date(Date.now() - COMMITS_SINCE_DAYS * 86_400_000).toISOString();
+  private async commitSamples(octokit: InstallationOctokit, since: Date): Promise<CommitSample[]> {
     const samples: CommitSample[] = [];
     for (const repo of await this.listRepos(octokit)) {
       for (let page = 1; page <= MAX_COMMIT_PAGES_PER_REPO; page++) {
@@ -232,7 +259,7 @@ export class GithubIdentitySync {
           .request("GET /repos/{owner}/{repo}/commits", {
             owner: repo.owner,
             repo: repo.name,
-            since,
+            since: since.toISOString(),
             per_page: PAGE,
             page,
           })
@@ -253,11 +280,14 @@ export class GithubIdentitySync {
         for (const c of data) {
           // `author` is set only when GitHub attributed the commit email to an account.
           const author = c.author && "login" in c.author ? c.author : undefined;
-          if (author && c.commit.author?.email) {
+          // `since` filters by the committer date, so recency is judged by it too.
+          const date = c.commit.committer?.date ?? c.commit.author?.date;
+          if (author && c.commit.author?.email && date) {
             samples.push({
               login: author.login,
               githubId: Number(author.id),
               email: c.commit.author.email,
+              at: new Date(date),
             });
           }
         }

@@ -5,7 +5,7 @@ import { DB, type Db } from "../src/db/db";
 import { identities, tenants } from "../src/db/schema";
 import { PeopleService } from "../src/identity/people.service";
 import type { FakeCommit, FakeGithub, FakeUser } from "./setup/fake-github";
-import { createTestApp } from "./setup/test-app";
+import { activateConfig, createTestApp } from "./setup/test-app";
 
 const ORG = "acme";
 const alice: FakeUser = { login: "Alice-Personal", id: 101 };
@@ -70,8 +70,9 @@ describe("GitHub identity sync (integration)", () => {
     return res.json();
   };
 
-  const commits = (author: FakeUser | null, email: string, n: number): FakeCommit[] =>
-    Array.from({ length: n }, () => ({ author, email }));
+  const commits = (author: FakeUser | null, email: string, n: number, date?: Date): FakeCommit[] =>
+    Array.from({ length: n }, () => ({ author, email, date }));
+  const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
 
   it("links members through verified domain emails (Enterprise Cloud)", async () => {
     const alicePerson = await slackPerson("alice", "alice@acme.com");
@@ -91,6 +92,19 @@ describe("GitHub identity sync (integration)", () => {
       unmatched: ["bobby", "carol"],
       verifiedDomainEmails: true,
       linkedBySource: { verified_domain: 1 },
+    });
+  });
+
+  it("matches verified domain emails through the org's synonym domains", async () => {
+    const alicePerson = await slackPerson("alice", "alice@acme.io");
+    await activateConfig(app, tenantId, { "config.yaml": "email_domains: [acme.io, acme.com]" });
+    github.verifiedDomainEmails = { "Alice-Personal": ["alice@acme.com"] };
+
+    await sync();
+
+    expect(await githubIdentity(101)).toMatchObject({
+      personId: alicePerson,
+      confidence: "verified",
     });
   });
 
@@ -119,7 +133,41 @@ describe("GitHub identity sync (integration)", () => {
       confidence: "suggested",
     });
     expect(await githubIdentity(103)).toBeUndefined();
-    expect(report).toMatchObject({ matched: 1, suggested: 1, unmatched: ["bobby", "carol"] });
+    // A suggested member is waiting for an admin, not missing.
+    expect(report).toMatchObject({
+      matched: 1,
+      suggested: 1,
+      suggestedMembers: ["bobby"],
+      unmatched: ["carol"],
+    });
+  });
+
+  it("treats the org's email domains from config.yaml as synonyms", async () => {
+    const alicePerson = await slackPerson("alice", "alice@acme.io");
+    await activateConfig(app, tenantId, { "config.yaml": "email_domains: [acme.io, acme.com]" });
+    github.commits.set(`${ORG}/web`, commits(alice, "alice@acme.com", 3));
+
+    await sync();
+
+    expect(await githubIdentity(101)).toMatchObject({ personId: alicePerson, confidence: "high" });
+  });
+
+  it("suggests links from commits older than the recent window, up to a year back", async () => {
+    const alicePerson = await slackPerson("alice", "alice@acme.com");
+    await slackPerson("bob", "bob@acme.com");
+    github.commits.set(`${ORG}/web`, [
+      ...commits(alice, "alice@acme.com", 5, daysAgo(200)),
+      ...commits(bob, "bob@acme.com", 5, daysAgo(400)),
+    ]);
+
+    const report = await sync();
+
+    expect(await githubIdentity(101)).toMatchObject({
+      personId: alicePerson,
+      confidence: "suggested",
+    });
+    expect(await githubIdentity(102)).toBeUndefined();
+    expect(report).toMatchObject({ suggestedMembers: ["Alice-Personal"] });
   });
 
   it("skips a repository it cannot read instead of failing the whole sync", async () => {

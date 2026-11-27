@@ -21,6 +21,8 @@ export interface FakeUser {
 export interface FakeCommit {
   author: FakeUser | null;
   email: string;
+  /** Commit date; now by default. */
+  date?: Date;
 }
 
 /** In-memory stand-in for the GitHub API routes the server uses. */
@@ -152,11 +154,17 @@ export class FakeGithub {
         if (error) throw new HttpError(error);
         const commits = this.commits.get(`${p.owner}/${p.repo}`);
         if (!commits) throw new HttpError(409); // empty repository
+        const now = new Date();
+        const since = p.since ? new Date(p.since) : undefined;
+        const listed = commits.filter((c) => !since || (c.date ?? now) >= since);
         return {
-          data: this.page(commits, p).map((c) => ({
-            author: c.author,
-            commit: { author: { email: c.email } },
-          })),
+          data: this.page(listed, p).map((c) => {
+            const date = (c.date ?? now).toISOString();
+            return {
+              author: c.author,
+              commit: { author: { email: c.email, date }, committer: { date } },
+            };
+          }),
         };
       }
     }

@@ -19,8 +19,63 @@ export const REMOVED_FILES: Record<string, string> = {
     "removed: accounts are linked by the Slack and GitHub syncs, `/notify link` and admins in /manage",
 };
 
+/**
+ * Shared mailbox providers: a local part there is a different person on each domain, so they
+ * can never be the organization's own synonym domains.
+ */
+const PUBLIC_MAIL_DOMAINS = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "outlook.com",
+  "hotmail.com",
+  "live.com",
+  "msn.com",
+  "yahoo.com",
+  "icloud.com",
+  "me.com",
+  "mac.com",
+  "aol.com",
+  "proton.me",
+  "protonmail.com",
+  "pm.me",
+  "gmx.com",
+  "gmx.de",
+  "fastmail.com",
+  "hey.com",
+  "zoho.com",
+  "yandex.ru",
+  "yandex.com",
+  "ya.ru",
+  "mail.ru",
+  "qq.com",
+  "163.com",
+  "users.noreply.github.com",
+]);
+
+const emailDomainSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/,
+    "must be a domain like acme.com",
+  )
+  .refine((domain) => !PUBLIC_MAIL_DOMAINS.has(domain), {
+    message: "is a public mail provider, not the organization's own domain",
+  });
+
 export const configFileSchema = z.strictObject({
   retention_days: z.number().int().min(1).max(365).default(30),
+  /**
+   * The organization's work email domains. Listed domains are synonyms: `alice@acme.io` and
+   * `alice@acme.com` are one person when linking GitHub accounts from commits.
+   */
+  email_domains: z
+    .array(emailDomainSchema)
+    .refine((domains) => new Set(domains).size >= 2, {
+      message: "list at least two different domains: they are synonyms of each other",
+    })
+    .default([]),
   defaults: z
     .strictObject({
       unmapped_recipient: z.enum(["plain_text"]).default("plain_text"),

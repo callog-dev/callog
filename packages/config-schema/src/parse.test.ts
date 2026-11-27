@@ -354,6 +354,39 @@ recipients: ["githb:octocat", "place:nowhere", "github:{{ data.x }}", "team:sre"
     expect(errors[0]).toMatchObject({ path: ["examples", 0, "recipients", 0] });
   });
 
+  describe("email_domains", () => {
+    const parseConfig = (yaml: string) => parseConfigTree({ "config.yaml": yaml });
+
+    it("is empty by default and lowercases the listed domains", () => {
+      const none = parseConfig("retention_days: 30");
+      expect(none.ok && none.config.config.email_domains).toEqual([]);
+      const listed = parseConfig("email_domains: [Acme.io, acme.com]");
+      expect(listed.ok && listed.config.config.email_domains).toEqual(["acme.io", "acme.com"]);
+    });
+
+    it("rejects public mail providers", () => {
+      expect(errorsOf(parseConfig("email_domains: [acme.io, Gmail.com]"))).toEqual([
+        {
+          file: "config.yaml",
+          path: ["email_domains", 1],
+          message: expect.stringContaining("public mail provider"),
+        },
+      ]);
+    });
+
+    it("needs at least two domains and well-formed names", () => {
+      expect(errorsOf(parseConfig("email_domains: [acme.io]"))[0]?.path).toEqual(["email_domains"]);
+      expect(errorsOf(parseConfig("email_domains: [acme.io, ACME.io]"))[0]?.path).toEqual([
+        "email_domains",
+      ]);
+      expect(parseConfig("email_domains: [acme.io, xn--80ak6aa92e.xn--p1ai]").ok).toBe(true);
+      expect(errorsOf(parseConfig("email_domains: [acme.io, '@acme.com']"))[0]?.path).toEqual([
+        "email_domains",
+        1,
+      ]);
+    });
+  });
+
   describe("no people in the repo", () => {
     it("rejects people.yaml and says where account links live now", () => {
       const result = parseConfigTree({ "people.yaml": "people: []" });

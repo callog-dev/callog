@@ -1,2 +1,6 @@
 # How long Callog keeps notifications and their payloads.
 retention_days: 30
+
+# Your work email domains, when people use more than one: the same name on any of them is one
+# person when Callog links GitHub accounts from commits.
+# email_domains: [acme.io, acme.com]

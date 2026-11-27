@@ -37864,7 +37864,7 @@ var require_schemas3 = __commonJS({
   "../config-schema/dist/schemas.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.routeSchema = exports2.destinationSchema = exports2.URGENCIES = exports2.blockSchema = exports2.placesFileSchema = exports2.placeSchema = exports2.teamsFileSchema = exports2.teamSchema = exports2.configFileSchema = exports2.REMOVED_FILES = exports2.REMOVED_KEYS = void 0;
+    exports2.routeSchema = exports2.destinationSchema = exports2.URGENCIES = exports2.blockSchema = exports2.placesFileSchema = exports2.placeSchema = exports2.teamsFileSchema = exports2.teamSchema = exports2.PLACE_PLACEHOLDER = exports2.configFileSchema = exports2.REMOVED_FILES = exports2.REMOVED_KEYS = void 0;
     exports2.isMoreUrgent = isMoreUrgent;
     var zod_1 = require_zod();
     var refs_1 = require_refs();
@@ -37875,15 +37875,57 @@ var require_schemas3 = __commonJS({
     exports2.REMOVED_FILES = {
       "people.yaml": "removed: accounts are linked by the Slack and GitHub syncs, `/notify link` and admins in /manage"
     };
+    var PUBLIC_MAIL_DOMAINS = /* @__PURE__ */ new Set([
+      "gmail.com",
+      "googlemail.com",
+      "outlook.com",
+      "hotmail.com",
+      "live.com",
+      "msn.com",
+      "yahoo.com",
+      "icloud.com",
+      "me.com",
+      "mac.com",
+      "aol.com",
+      "proton.me",
+      "protonmail.com",
+      "pm.me",
+      "gmx.com",
+      "gmx.de",
+      "fastmail.com",
+      "hey.com",
+      "zoho.com",
+      "yandex.ru",
+      "yandex.com",
+      "ya.ru",
+      "mail.ru",
+      "qq.com",
+      "163.com",
+      "users.noreply.github.com"
+    ]);
+    var emailDomainSchema = zod_1.z.string().trim().toLowerCase().regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/, "must be a domain like acme.com").refine((domain) => !PUBLIC_MAIL_DOMAINS.has(domain), {
+      message: "is a public mail provider, not the organization's own domain"
+    });
     exports2.configFileSchema = zod_1.z.strictObject({
       retention_days: zod_1.z.number().int().min(1).max(365).default(30),
+      /**
+       * The organization's work email domains. Listed domains are synonyms: `alice@acme.io` and
+       * `alice@acme.com` are one person when linking GitHub accounts from commits.
+       */
+      email_domains: zod_1.z.array(emailDomainSchema).refine((domains) => new Set(domains).size >= 2, {
+        message: "list at least two different domains: they are synonyms of each other"
+      }).default([]),
       defaults: zod_1.z.strictObject({
         unmapped_recipient: zod_1.z.enum(["plain_text"]).default("plain_text")
       }).default({ unmapped_recipient: "plain_text" })
     });
+    exports2.PLACE_PLACEHOLDER = "<channel ID or #name>";
+    var roomSchema = zod_1.z.string().min(1).refine((room2) => room2 !== exports2.PLACE_PLACEHOLDER, {
+      message: "set a channel: replace the placeholder with a Slack channel ID (C0123ABCDEF) or #name, or a Telegram chat id"
+    });
     exports2.teamSchema = zod_1.z.strictObject({
-      slack_channel: zod_1.z.string().min(1).optional(),
-      telegram_chat: zod_1.z.string().min(1).optional(),
+      slack_channel: roomSchema.optional(),
+      telegram_chat: roomSchema.optional(),
       /** The only source of a team's people: a GitHub team and/or a Slack user group. */
       members_from: zod_1.z.strictObject({
         github_team: zod_1.z.string().min(1).optional(),
@@ -37898,8 +37940,8 @@ var require_schemas3 = __commonJS({
       teams: zod_1.z.record(refs_1.slugSchema, exports2.teamSchema).default({})
     });
     exports2.placeSchema = zod_1.z.union([
-      zod_1.z.strictObject({ slack: zod_1.z.string().min(1) }),
-      zod_1.z.strictObject({ telegram: zod_1.z.string().min(1) })
+      zod_1.z.strictObject({ slack: roomSchema }),
+      zod_1.z.strictObject({ telegram: roomSchema })
     ]);
     exports2.placesFileSchema = zod_1.z.strictObject({
       places: zod_1.z.record(refs_1.slugSchema, exports2.placeSchema).default({})
@@ -38069,7 +38111,7 @@ var require_parse3 = __commonJS({
       }
       const teams = teamsFile?.teams ?? {};
       const places = placesFile?.places ?? {};
-      checkRoutes(routes, routeFiles, teams, places, errors);
+      checkRoutes(routes, routeFiles, teamsFile?.teams, placesFile?.places, errors);
       if (errors.length > 0)
         return { ok: false, errors, warnings };
       return {
@@ -38130,7 +38172,7 @@ var require_parse3 = __commonJS({
       for (const [id, route] of Object.entries(routes)) {
         const file = routeFiles[id];
         const checkPlace = (path4, name) => {
-          if (ownValue2(places, name))
+          if (!places || ownValue2(places, name))
             return;
           errors.push({ file, path: path4, message: `unknown place "${name}" (not defined in places.yaml)` });
         };
@@ -38169,7 +38211,7 @@ var require_parse3 = __commonJS({
         route.destinations.forEach((destination, i) => {
           if ("place" in destination)
             checkPlace(["destinations", i, "place"], destination.place);
-          if (!("team" in destination))
+          if (!("team" in destination) || !teams)
             return;
           const team = ownValue2(teams, destination.team);
           if (!team) {

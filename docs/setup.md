@@ -319,3 +319,26 @@ message.
 **Reaching Callog.** Senders call the API under `/v1/`. On Kubernetes, senders in the cluster
 use the api Service, and senders outside it need the chart's `sendersIngress`; both are in the
 [chart's README](../charts/callog/README.md#senders).
+
+## 12. Linking GitHub accounts
+
+People come from Slack, anchored by their work email. Every hour Callog links the GitHub
+accounts of the org members to them: through verified domain emails (GitHub Enterprise Cloud
+with a verified domain) and through commits. A commit links its author when GitHub attributed
+it to the account and its email is someone's work email. At least 3 such commits in the last
+90 days make the link usable for mentions; fewer, or only older commits (up to a year back),
+make it a suggestion that an admin confirms in **People**. Commits are read from the
+repositories the GitHub App is installed on, the default branch only.
+
+**Several email domains.** When people commit as `alice@acme.com` but their Slack email is
+`alice@acme.io`, list the organization's domains in `config.yaml`:
+
+```yaml
+email_domains: [acme.io, acme.com]
+```
+
+When Callog links GitHub accounts, the listed domains are synonyms: the same name before the
+`@` on any of them is one person, and such a commit or verified domain email counts as much as
+the Slack email itself. Recipients such as `email:alice@acme.com` still match the exact email. List at least two domains.
+Public mail providers (`gmail.com`, `outlook.com`, GitHub's `noreply` addresses, …) are
+rejected: a name there belongs to a different person on each domain.
