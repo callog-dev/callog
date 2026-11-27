@@ -111,6 +111,18 @@ or a channel: that is the config's business.
   in [templates/presets](templates/presets); the first is for Grafana Alerting. Connecting
   one is described in [docs/setup.md](docs/setup.md#11-places-hooks-and-alert-sources).
 
+A sender sees what became of its notification with `GET /v1/notifications/:id`, and can stop
+it while it is not delivered yet with the same credential it sent it with:
+
+```bash
+curl -X POST $PUBLIC_URL/v1/notifications/$NOTIFICATION_ID/cancel \
+  -H "Authorization: Bearer $NOTIFY_API_KEY"
+```
+
+`200` means it was cancelled: deliveries not sent yet are dropped, messages already sent stay.
+`409` means it is too late; the body's `status` says what became of it. `404` means there is no
+such notification, or another sender sent it.
+
 A route with personal copies (`dm: true`) does not give up on a person at the first refusal:
 a copy a messenger will not take goes to the person's other messenger, then to the room of the
 team they were named through, then to the route's default place. A notification's page shows

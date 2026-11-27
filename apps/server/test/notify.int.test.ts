@@ -2,8 +2,9 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DB, type Db } from "../src/db/db";
-import { notifications, tenants } from "../src/db/schema";
+import { auditLog, notifications, tenants } from "../src/db/schema";
 import { NotificationsService } from "../src/notifications/notifications.service";
+import { ApiKeysService } from "../src/producers/api-keys.service";
 import type { FakeOidc } from "./setup/fake-oidc";
 import { createTestApp, createTenant, activateConfig } from "./setup/test-app";
 
@@ -248,14 +249,14 @@ describe("POST /v1/notify (integration)", () => {
     });
   });
 
-  describe("GET /v1/notifications/:id", () => {
-    const get = (id: string, auth = token) =>
-      app.inject({
-        method: "GET",
-        url: `/v1/notifications/${id}`,
-        headers: { authorization: `Bearer ${auth}` },
-      });
+  const get = (id: string, auth = token) =>
+    app.inject({
+      method: "GET",
+      url: `/v1/notifications/${id}`,
+      headers: { authorization: `Bearer ${auth}` },
+    });
 
+  describe("GET /v1/notifications/:id", () => {
     it("returns the notification status to the same organization", async () => {
       const id = (await notify(BODY)).json().notification_id;
       const res = await get(id);
@@ -295,6 +296,82 @@ describe("POST /v1/notify (integration)", () => {
         .returning();
       expect(other).toBeDefined();
       expect((await get(id, await oidc.sign("other/repo"))).statusCode).toBe(404);
+    });
+
+    it("hides notifications of other senders of the same organization", async () => {
+      const id = (await notify(BODY)).json().notification_id;
+      const otherRepo = await oidc.sign("acme/web");
+
+      const foreign = await get(id, otherRepo);
+
+      expect(foreign.statusCode).toBe(404);
+      expect(foreign.json()).toEqual((await get(crypto.randomUUID(), otherRepo)).json());
+      expect((await get(id, await oidc.sign("ACME/E2E"))).statusCode).toBe(200);
+    });
+  });
+
+  describe("POST /v1/notifications/:id/cancel", () => {
+    const cancel = (id: string, auth = token) =>
+      app.inject({
+        method: "POST",
+        url: `/v1/notifications/${id}/cancel`,
+        headers: { authorization: `Bearer ${auth}` },
+      });
+
+    it("lets the sender cancel its notification before it is delivered", async () => {
+      const id = (await notify(BODY)).json().notification_id;
+
+      const res = await cancel(id);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ id, status: "cancelled" });
+      const [n] = await db.select().from(notifications).where(eq(notifications.id, id));
+      expect(n).toMatchObject({
+        status: "cancelled",
+        cancelledBy: { type: "sender", source: { type: "github_oidc", repository: "acme/e2e" } },
+      });
+      const [entry] = await db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, "notification.cancelled"));
+      expect(entry).toMatchObject({
+        actorPersonId: null,
+        actorGithubLogin: null,
+        details: { notificationId: id, by: { type: "sender", source: { repository: "acme/e2e" } } },
+      });
+    });
+
+    it("answers another sender as if the notification did not exist", async () => {
+      const id = (await notify(BODY)).json().notification_id;
+      const otherRepo = await oidc.sign("acme/web");
+
+      const foreign = await cancel(id, otherRepo);
+      const missing = await cancel(crypto.randomUUID(), otherRepo);
+
+      expect(foreign.statusCode).toBe(404);
+      expect(foreign.json()).toEqual(missing.json());
+      expect((await get(id)).json().status).toBe("accepted");
+    });
+
+    it("tells what became of a notification it is too late to cancel", async () => {
+      const id = (await notify(BODY)).json().notification_id;
+      await db.update(notifications).set({ status: "delivered" }).where(eq(notifications.id, id));
+
+      const res = await cancel(id);
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ status: "delivered" });
+    });
+
+    it("lets only the API key that sent the notification cancel it", async () => {
+      const keys = app.get(ApiKeysService);
+      const { key: billing } = await keys.create(tenantId, "billing");
+      const { key: ops } = await keys.create(tenantId, "ops");
+      const id = (await notify(BODY, {}, billing)).json().notification_id;
+
+      expect((await cancel(id, ops)).statusCode).toBe(404);
+      expect((await cancel(id, billing)).statusCode).toBe(200);
+      expect((await cancel(id, billing)).json()).toMatchObject({ status: "cancelled" });
     });
   });
 });

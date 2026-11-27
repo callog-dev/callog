@@ -76,6 +76,26 @@ idempotency-key: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }
 
 `notification-id` — id of the accepted notification (`GET /v1/notifications/:id`).
 
+A later step can cancel the notification while it is not delivered yet, with the workflow's
+OIDC token. Here the Callog step has `id: notify`, and the job needs
+`permissions: id-token: write`; change `audience=callog` if you set `audience` on the action:
+
+```yaml
+- name: Cancel the notification
+  if: ${{ steps.notify.outputs.notification-id }}
+  run: |
+    token=$(curl -sf "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=callog" \
+      -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" | jq -r .value)
+    curl -s -X POST "$CALLOG_URL/v1/notifications/$NOTIFICATION_ID/cancel" \
+      -H "Authorization: Bearer $token"
+  env:
+    CALLOG_URL: https://callog.example.com
+    NOTIFICATION_ID: ${{ steps.notify.outputs.notification-id }}
+```
+
+`200` — cancelled; `409` — too late, the body's `status` says what became of it. Add `-f` to the
+second `curl` if a notification that could not be cancelled should fail the step.
+
 ## Development
 
 The action has no runtime dependencies: `pnpm --filter @callog/action build` compiles `src/` to

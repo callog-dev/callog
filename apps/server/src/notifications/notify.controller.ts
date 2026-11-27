@@ -12,6 +12,7 @@ import {
   type RawBodyRequest,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { SYSTEM_ACTOR } from "../audit/audit.service";
 import { ProducerAuthService } from "../producers/producer-auth.service";
 import { NotificationsService } from "./notifications.service";
 import { assertBodySize, parseNotifyRequest } from "./notify-request";
@@ -54,6 +55,23 @@ export class NotifyController {
     @Param("id", ParseUUIDPipe) id: string,
   ) {
     const producer = await this.auth.authenticate(authorization);
-    return this.notifications.get(producer.tenantId, id);
+    return this.notifications.get(producer, id);
+  }
+
+  /** 200 when cancelled, 409 with the notification's `status` when too late, 404 if not its own. */
+  @Post("notifications/:id/cancel")
+  @HttpCode(200)
+  async cancel(
+    @Headers("authorization") authorization: string | undefined,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    const producer = await this.auth.authenticate(authorization);
+    await this.notifications.cancel(
+      producer.tenantId,
+      id,
+      { type: "sender", source: producer.source },
+      SYSTEM_ACTOR,
+    );
+    return { id, status: "cancelled" };
   }
 }

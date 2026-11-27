@@ -23,7 +23,15 @@ import { and, desc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { AuditService, type AuditActor } from "../audit/audit.service";
 import { sha256Hex } from "../crypto/digest";
 import { DB, type Db } from "../db/db";
-import { deliveries, idempotencyKeys, isOpen, notifications, type CancelledBy } from "../db/schema";
+import {
+  deliveries,
+  idempotencyKeys,
+  isOpen,
+  isSameSender,
+  notifications,
+  type CancelledBy,
+  type NotificationSource,
+} from "../db/schema";
 import { ProducerAuthService, type Producer } from "../producers/producer-auth.service";
 import { QueueService } from "../queue/queue.service";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
@@ -199,12 +207,15 @@ export class NotificationsService {
     }
   }
 
-  async get(tenantId: string, notificationId: string) {
+  /** What became of a notification, for its sender. */
+  async get(sender: Pick<Producer, "tenantId" | "source">, notificationId: string) {
     const [notification] = await this.db
       .select()
       .from(notifications)
-      .where(and(eq(notifications.tenantId, tenantId), eq(notifications.id, notificationId)));
-    if (!notification) throw new NotFoundException("Notification not found");
+      .where(
+        and(eq(notifications.tenantId, sender.tenantId), eq(notifications.id, notificationId)),
+      );
+    assertVisible(notification, sender.source);
     const trace = await this.trace.of(notification);
     return {
       id: notification.id,
@@ -289,7 +300,7 @@ export class NotificationsService {
   /**
    * Stops a notification that is not delivered yet: what is still pending is cancelled and
    * its job leaves the queue. What was already sent stays. A job already running sees the
-   * cancellation before each delivery (DeliveryService).
+   * cancellation before each delivery (DeliveryService). A sender may stop only what it sent.
    */
   async cancel(
     tenantId: string,
@@ -299,15 +310,16 @@ export class NotificationsService {
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
       const [notification] = await tx
-        .select({ status: notifications.status })
+        .select({ status: notifications.status, source: notifications.source })
         .from(notifications)
         .where(and(eq(notifications.tenantId, tenantId), eq(notifications.id, notificationId)))
         .for("update");
-      if (!notification) throw new NotFoundException("Notification not found");
+      assertVisible(notification, by.type === "sender" ? by.source : undefined);
       if (!isOpen(notification.status)) {
-        throw new ConflictException(
-          `Nothing to cancel: the notification is ${notification.status}`,
-        );
+        throw new ConflictException({
+          message: `Nothing to cancel: the notification is ${notification.status}`,
+          status: notification.status,
+        });
       }
       const cancelled = await cancelPending(tx, notificationId);
       await tx
@@ -320,7 +332,7 @@ export class NotificationsService {
           tenantId,
           action: "notification.cancelled",
           actor,
-          details: { notificationId, deliveries: cancelled.length },
+          details: { notificationId, deliveries: cancelled.length, by },
         },
         tx,
       );
@@ -433,6 +445,19 @@ export class NotificationsService {
       throw new ConflictException("Idempotency-Key was already used with a different request body");
     }
     return existing.notificationId;
+  }
+}
+
+/**
+ * 404 when there is no such notification, or when `sender` (if given) did not send it: the
+ * same answer, so a sender cannot learn what others sent.
+ */
+function assertVisible<T extends { source: NotificationSource }>(
+  notification: T | undefined,
+  sender: NotificationSource | undefined,
+): asserts notification is T {
+  if (!notification || (sender && !isSameSender(notification.source, sender))) {
+    throw new NotFoundException("Notification not found");
   }
 }
 

@@ -23,6 +23,7 @@ import {
   adminApi,
   api,
   type NotificationRow,
+  type NotificationSource,
   type NotificationStatus,
   type TraceNote,
 } from "@/lib/api";
@@ -63,7 +64,7 @@ function StatusBadge({ status }: { status: NotificationStatus }) {
 }
 
 /** `key` is what the source filter matches: a repository or an API key name. */
-function describeSource(s: NotificationRow["source"]): { key: string | null; label: string } {
+function describeSource(s: NotificationSource): { key: string | null; label: string } {
   if (s.type === "github_oidc") return { key: s.repository, label: s.repository };
   if (s.type === "api_key") return { key: s.apiKeyName, label: `key ${s.apiKeyName}` };
   if (s.type === "hook") return { key: null, label: `hook ${s.hookName}` };
@@ -392,7 +393,10 @@ function Details({ id }: { id: string }) {
           </div>
           {d.cancelled && (
             <p className="mb-2 text-muted-foreground">
-              Cancelled by {d.cancelled.by.type === "admin" ? d.cancelled.by.actor : "the sender"}{" "}
+              Cancelled by{" "}
+              {d.cancelled.by.type === "admin"
+                ? d.cancelled.by.actor
+                : `the sender, ${describeSource(d.cancelled.by.source).label}`}{" "}
               <span title={d.cancelled.at}>{ago(d.cancelled.at)}</span>.
             </p>
           )}

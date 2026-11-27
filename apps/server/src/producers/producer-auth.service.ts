@@ -8,7 +8,7 @@ import {
 import { DIRECT_ROUTE, type Route } from "@callog/config-schema";
 import type { JWTVerifyGetKey } from "jose";
 import { ENV, type Env } from "../config/env";
-import type { NotificationSource } from "../db/schema";
+import { sameRepository, type NotificationSource } from "../db/schema";
 import { TenantsService } from "../tenants/tenants.service";
 import { ApiKeysService } from "./api-keys.service";
 import { OIDC_KEY_RESOLVER, verifyGithubActionsToken } from "./github-oidc";
@@ -77,7 +77,7 @@ export class ProducerAuthService {
       (route.id === DIRECT_ROUTE.id && producer.direct === true) ||
       (source.type === "hook" && source.routeId === route.id) ||
       (source.type === "github_oidc" &&
-        github_repos.some((r) => r.toLowerCase() === source.repository.toLowerCase())) ||
+        github_repos.some((r) => sameRepository(r, source.repository))) ||
       (source.type === "api_key" && api_keys.includes(source.apiKeyName));
     if (!allowed) {
       throw new ForbiddenException(

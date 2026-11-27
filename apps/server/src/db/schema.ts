@@ -165,7 +165,22 @@ export function isOpen(status: string): status is (typeof OPEN_STATUSES)[number]
 }
 
 /** Who stopped a notification: an admin (`@login` or a person's name), or its sender. */
-export type CancelledBy = { type: "admin"; actor: string } | { type: "sender" };
+export type CancelledBy =
+  { type: "admin"; actor: string } | { type: "sender"; source: NotificationSource };
+
+/** Whether `source` is the sender of a notification sent from `sentFrom`: the same API key or repository. */
+export function isSameSender(sentFrom: NotificationSource, source: NotificationSource): boolean {
+  if (sentFrom.type === "api_key" && source.type === "api_key")
+    return sentFrom.apiKeyId === source.apiKeyId;
+  if (sentFrom.type === "github_oidc" && source.type === "github_oidc")
+    return sameRepository(sentFrom.repository, source.repository);
+  return false;
+}
+
+/** GitHub repository names do not depend on case. */
+export function sameRepository(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
 
 /** Why a recipient of a notification got no message of their own, or no mention. */
 export interface TraceNote {

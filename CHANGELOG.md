@@ -23,9 +23,19 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
   action is recorded in the audit log. `GET /v1/notifications/:id` returns the new status and
   `cancelled: { at, by: { type: "admin" } }`, without naming the admin. A cancelled repeat of
   a grouped notification edits nothing and is not counted in "Repeated N times".
+- A sender can cancel its own notification while it is not delivered yet:
+  `POST /v1/notifications/:id/cancel` with the API key or the GitHub Actions OIDC token it was
+  sent with. It answers `200 { id, status: "cancelled" }`, `409` with the notification's
+  current `status` when it is too late (`delivered`, `failed`, already `cancelled`, …), and
+  `404` when there is no such notification or another sender sent it. The Deliveries panel
+  names the API key or repository that cancelled it, and so does the `notification.cancelled`
+  audit entry.
 
 ### Changed
 
+- `GET /v1/notifications/:id` answers only the sender of the notification — the same API key,
+  or the same repository for GitHub Actions. Other senders of the organization get `404`, as
+  for a notification that does not exist. Before, any sender of the organization could read it.
 - A config repo created from the template no longer points at `#general`. Its place,
   `updates`, starts with the placeholder `<channel ID or #name>`, and a config that still has
   it is rejected by `notify validate` and by the server with
