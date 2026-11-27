@@ -29,10 +29,26 @@ export const configFileSchema = z.strictObject({
 });
 export type ConfigFile = z.infer<typeof configFileSchema>;
 
+/**
+ * The channel of the starter config's place. No Slack channel or Telegram chat can have this
+ * name, so a config created from the template is rejected until someone picks a room, instead
+ * of posting to a guessed one.
+ */
+export const PLACE_PLACEHOLDER = "<channel ID or #name>";
+
+/** A Slack channel (name or id) or a Telegram chat id. */
+const roomSchema = z
+  .string()
+  .min(1)
+  .refine((room) => room !== PLACE_PLACEHOLDER, {
+    message:
+      "set a channel: replace the placeholder with a Slack channel ID (C0123ABCDEF) or #name, or a Telegram chat id",
+  });
+
 export const teamSchema = z
   .strictObject({
-    slack_channel: z.string().min(1).optional(),
-    telegram_chat: z.string().min(1).optional(),
+    slack_channel: roomSchema.optional(),
+    telegram_chat: roomSchema.optional(),
     /** The only source of a team's people: a GitHub team and/or a Slack user group. */
     members_from: z
       .strictObject({
@@ -55,8 +71,8 @@ export const teamsFileSchema = z.strictObject({
 
 /** A room of one channel: a Slack channel (name or id) or a Telegram chat id. */
 export const placeSchema = z.union([
-  z.strictObject({ slack: z.string().min(1) }),
-  z.strictObject({ telegram: z.string().min(1) }),
+  z.strictObject({ slack: roomSchema }),
+  z.strictObject({ telegram: roomSchema }),
 ]);
 export type Place = z.infer<typeof placeSchema>;
 

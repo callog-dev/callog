@@ -19,6 +19,10 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 
 ### Changed
 
+- A config repo created from the template no longer points at `#general`. Its place,
+  `updates`, starts with the placeholder `<channel ID or #name>`, and a config that still has
+  it is rejected by `notify validate` and by the server with
+  `places.updates.slack: set a channel`. A place that names `#general` on purpose keeps working.
 - "Send test" says where the test goes and asks before it sends. A test is a real notification
   of the route: it is posted to the route's places and channels, and to you only when the
   route sends personal copies. The checklist used to call it "to yourself"; now the places
@@ -37,7 +41,7 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 None. To see the state of the places of a config that was loaded before the upgrade, press
 **Load now** on the Config page once. In a large workspace, inviting the bot to the channels
 it posts to (or giving a place the channel ID instead of its name) keeps the lookup to a
-single request.
+single request. Config repos already created from the template are not affected.
 
 ## [0.5.1]
 

@@ -136,7 +136,9 @@ export function parseConfigTree(tree: ConfigTree): ParseResult {
   const teams = teamsFile?.teams ?? {};
   const places = placesFile?.places ?? {};
 
-  checkRoutes(routes, routeFiles, teams, places, errors);
+  // An invalid teams.yaml or places.yaml is already an error; every team or place a route names
+  // would look unknown on top of it.
+  checkRoutes(routes, routeFiles, teamsFile?.teams, placesFile?.places, errors);
 
   if (errors.length > 0) return { ok: false, errors, warnings };
   return {
@@ -206,14 +208,14 @@ function removedKeyId(file: string, path: (string | number)[], key: string): str
 function checkRoutes(
   routes: Record<string, Route>,
   routeFiles: Record<string, string>,
-  teams: Record<string, Team>,
-  places: Record<string, Place>,
+  teams: Record<string, Team> | undefined,
+  places: Record<string, Place> | undefined,
   errors: ConfigIssue[],
 ): void {
   for (const [id, route] of Object.entries(routes)) {
     const file = routeFiles[id]!;
     const checkPlace = (path: (string | number)[], name: string) => {
-      if (ownValue(places, name)) return;
+      if (!places || ownValue(places, name)) return;
       errors.push({ file, path, message: `unknown place "${name}" (not defined in places.yaml)` });
     };
     checkDataSchema(route, file, errors);
@@ -249,7 +251,7 @@ function checkRoutes(
     });
     route.destinations.forEach((destination, i) => {
       if ("place" in destination) checkPlace(["destinations", i, "place"], destination.place);
-      if (!("team" in destination)) return;
+      if (!("team" in destination) || !teams) return;
       const team = ownValue(teams, destination.team);
       if (!team) {
         errors.push({

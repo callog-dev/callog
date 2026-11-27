@@ -156,6 +156,7 @@ const TEMPLATE = { owner: "callog-dev", name: "notify-config-template" };
 function ConfigRepoHint({
   org,
   repo,
+  done,
   rejected,
   errors,
   installationId,
@@ -163,7 +164,8 @@ function ConfigRepoHint({
   if (rejected) {
     return (
       <>
-        The latest push was rejected; the previous version stays active.
+        The latest push was rejected
+        {done ? "; the previous version stays active." : ", so no config is active yet."}
         <ConfigIssueList issues={errors} />
       </>
     );
@@ -188,7 +190,8 @@ function ConfigRepoHint({
       >
         Create it from the template
       </a>
-      , then load it. Callog also loads every push to its default branch.
+      , set the channel of its place in <code>places.yaml</code>, then load it. Callog also loads
+      every push to its default branch.
       {installationId && (
         <>
           {" "}

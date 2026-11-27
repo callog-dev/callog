@@ -1,5 +1,7 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { desc, eq } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DB, type Db } from "../src/db/db";
 import { configVersions, tenants } from "../src/db/schema";
@@ -12,6 +14,13 @@ import { ADMIN_TOKEN, createTestApp, eventually } from "./setup/test-app";
 const ORG = "acme";
 const CONFIG_REPO = `${ORG}/notify-config`;
 const INSTALLATION = 501;
+
+/** The config files of a repo created from the setup checklist's template. */
+function starterTemplate(): Record<string, string> {
+  const root = path.resolve(__dirname, "../../../templates/notify-config");
+  const files = ["places.yaml", "routes/hello.yaml"];
+  return Object.fromEntries(files.map((f) => [f, readFileSync(path.join(root, f), "utf8")]));
+}
 
 const route = (id: string, destination = '{ slack: "#alerts" }') => `
 id: ${id}
@@ -126,6 +135,22 @@ describe("tenant config loading (integration)", () => {
     const [latest] = await versions();
     expect(latest).toMatchObject({ status: "invalid", commitSha: bad });
     expect(JSON.stringify(latest!.errors)).toContain('unknown team \\"nope\\"');
+  });
+
+  it("rejects a config created from the starter template until its place has a channel", async () => {
+    const sha = github.push(CONFIG_REPO, starterTemplate());
+
+    expect(await loader.load(tenant.id)).toMatchObject({ status: "invalid", commitSha: sha });
+    const [latest] = await versions();
+    expect(latest!.errors).toMatchObject({
+      errors: [
+        {
+          file: "places.yaml",
+          path: ["places", "updates", "slack"],
+          message: expect.stringContaining("set a channel"),
+        },
+      ],
+    });
   });
 
   it("does not create a version when HEAD has not changed", async () => {
