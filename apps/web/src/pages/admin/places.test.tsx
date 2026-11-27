@@ -33,6 +33,26 @@ describe("PlacesTab", () => {
     expect(screen.getByText("no route — senders can still name it")).toBeInTheDocument();
   });
 
+  it("shows what is wrong with a place's channel next to its room", async () => {
+    server.use(
+      http.get("*/api/admin/places", () =>
+        HttpResponse.json([
+          {
+            name: "gone",
+            channel: "slack",
+            room: "#nope",
+            routes: [],
+            defaultFor: [],
+            issue: { level: "error", message: "Slack channel #nope was not found." },
+          },
+        ]),
+      ),
+    );
+    renderPage(<PlacesTab />);
+
+    expect(await screen.findByText("Slack channel #nope was not found.")).toBeInTheDocument();
+  });
+
   it("says where places come from when there are none", async () => {
     server.use(http.get("*/api/admin/places", () => HttpResponse.json([])));
     renderPage(<PlacesTab />);

@@ -1,5 +1,11 @@
 import type { ConfigIssue } from "@/lib/api";
 
+/** How a problem reads by its level: an error stops something, a warning does not. */
+export const ISSUE_LEVEL_TEXT = {
+  error: "text-destructive",
+  warning: "text-muted-foreground",
+} as const;
+
 /** Problems of a config push: file, path in the YAML and what is wrong. */
 export function ConfigIssueList({
   issues,

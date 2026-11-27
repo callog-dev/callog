@@ -55,6 +55,8 @@ export interface SlackApi {
   listUsers(): Promise<SlackUser[]>;
   /** One page of unarchived channels; pass the previous page's `nextCursor` to go on. */
   listChannelPage(scope: SlackChannelScope, cursor?: string): Promise<SlackChannelPage>;
+  /** A channel by its id; `channel_not_found` when it is gone or closed to the bot. */
+  channelInfo(id: string): Promise<{ name: string; archived: boolean }>;
   listUsergroups(): Promise<SlackUsergroup[]>;
   openDm(userId: string): Promise<string>;
   postMessage(channel: string, message: SlackMessagePayload): Promise<SlackPostResult>;
@@ -164,6 +166,13 @@ class WebClientSlackApi implements SlackApi {
         ),
         nextCursor: res.response_metadata?.next_cursor || undefined,
       };
+    });
+  }
+
+  channelInfo(id: string) {
+    return call(async () => {
+      const { channel } = await this.client.conversations.info({ channel: id });
+      return { name: channel?.name ?? "", archived: channel?.is_archived ?? false };
     });
   }
 

@@ -19,6 +19,7 @@ import { ownValue, parseRef, slugSchema, type ConfigIssue, type Ref } from "@cal
 import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { parseBody } from "../admin/parse-body";
+import { PlaceChecks } from "../channels/place-checks";
 import { DB, type Db } from "../db/db";
 import {
   configVersions,
@@ -174,6 +175,7 @@ export class AdminApiController {
     private readonly lifecycle: LifecycleJobs,
     private readonly retention: RetentionService,
     private readonly telegramSender: TelegramSender,
+    private readonly placeChecks: PlaceChecks,
   ) {}
 
   // ---- Teams ----
@@ -613,8 +615,9 @@ export class AdminApiController {
   /** The places of the active config: the room behind each name, and the routes that use it. */
   @Get("places")
   async listPlaces(@Req() req: SessionRequest) {
-    const config = (await this.configs.getActive(req.session!.tenantId))?.config;
-    if (!config) return [];
+    const active = await this.configs.getActive(req.session!.tenantId);
+    if (!active) return [];
+    const { config, placeIssues } = active;
     const routes = Object.values(config.routes);
     const places = Object.entries(config.places).sort(([a], [b]) => a.localeCompare(b));
     return places.map(([name, place]) => {
@@ -628,6 +631,7 @@ export class AdminApiController {
           .filter((r) => r.destinations.some((d) => "place" in d && d.place === name))
           .map((r) => r.id),
         defaultFor: routes.filter((r) => r.default_place === name).map((r) => r.id),
+        issue: ownValue(placeIssues, name),
       };
     });
   }
@@ -676,6 +680,7 @@ export class AdminApiController {
     try {
       const connection = await this.slack.connect(tenantId, botToken, appToken);
       await this.slackEvents.requestSync(tenantId);
+      await this.placeChecks.request(tenantId);
       return { team: connection.teamName };
     } catch (err) {
       if (err instanceof SlackTokenRejectedError) throw new BadRequestException(err.message);
@@ -1011,8 +1016,12 @@ export class AdminApiController {
   }
 
   @Post("config/reload")
-  reload(@Req() req: SessionRequest) {
-    return this.loader.load(req.session!.tenantId);
+  async reload(@Req() req: SessionRequest) {
+    const { tenantId } = req.session!;
+    const result = await this.loader.load(tenantId);
+    // Also when nothing was loaded: this is how an admin checks again after fixing a room.
+    await this.placeChecks.request(tenantId);
+    return result;
   }
 
   private async githubLoginOf(tenantId: string, personId: string): Promise<string | undefined> {

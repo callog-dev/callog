@@ -7,7 +7,7 @@ import { DataTable, type ColumnDef } from "@/components/data-table";
 import { EmptyState, ErrorState } from "@/components/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Sheet,
   SheetContent,
@@ -16,7 +16,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ConfigIssueList } from "@/components/config-issues";
+import { ConfigIssueList, ISSUE_LEVEL_TEXT } from "@/components/config-issues";
 import { adminApi, type ConfigVersionRow } from "@/lib/api";
 import { ago } from "@/lib/time";
 import { LoadConfigButton } from "./getting-started";
@@ -31,6 +31,14 @@ export function ConfigPage() {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextBefore ?? undefined,
   });
+  // Places are checked in the background after a load, so the answer comes a little later.
+  const places = useQuery({
+    queryKey: ["admin", "places"],
+    queryFn: adminApi.places,
+    refetchInterval: 10_000,
+  });
+  const troubled =
+    places.data?.flatMap(({ name, issue }) => (issue ? [{ name, issue }] : [])) ?? [];
   const rows = useMemo(() => versions.data?.pages.flatMap((p) => p.items) ?? [], [versions.data]);
   const repo = status.data?.configRepo;
 
@@ -61,6 +69,20 @@ export function ConfigPage() {
           </div>
           <LoadConfigButton />
         </CardHeader>
+        {troubled.length > 0 && (
+          <CardContent className="text-sm">
+            <h3 id="place-problems" className="font-medium">
+              Places with problems
+            </h3>
+            <ul aria-labelledby="place-problems" className="mt-1 list-disc space-y-1 pl-4">
+              {troubled.map((place) => (
+                <li key={place.name} className={ISSUE_LEVEL_TEXT[place.issue.level]}>
+                  <code>{place.name}</code> — {place.issue.message}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        )}
       </Card>
 
       {versions.isPending ? (

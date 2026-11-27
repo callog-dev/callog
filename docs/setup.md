@@ -264,6 +264,10 @@ all public channels of the workspace. In a workspace with thousands of channels 
 lookup takes many requests against Slack's rate limit, so the first notification to a channel
 the bot is not in can take a while: invite the bot to the channel, or use the ID.
 
+The names are looked up when a config is loaded. A place whose channel was not found is listed
+on the Config page and in Settings → Places; after fixing it in Slack (inviting the bot,
+unarchiving the channel) or in the config, press **Load now** to check again.
+
 **Hooks.** A system that sends its own webhooks cannot build Callog's request, and often cannot
 hold an API key. In Settings → Hooks an admin creates a hook for one route and gets its URL,
 shown once. Whatever JSON object is posted there becomes the notification's `data`; the route

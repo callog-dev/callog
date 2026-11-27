@@ -66,6 +66,8 @@ export class FakeSlack {
   /** The next request with a cursor is refused once, as Slack does with an expired one. */
   expireChannelCursor = false;
   private channelWindow = { served: 0, blockedUntil: 0 };
+  /** How many times a single channel was asked about. */
+  channelInfoCalls = 0;
   usergroups: SlackUsergroup[] = [];
   posted: { channel: string; message: SlackMessagePayload; ts?: string }[] = [];
   updated: { channel: string; ts: string; message: SlackMessagePayload }[] = [];
@@ -96,6 +98,13 @@ export class FakeSlack {
           : Promise.reject(new SlackApiError("invalid_auth")),
       listUsers: () => guard(() => this.users),
       listChannelPage: (scope, cursor) => guard(() => this.channelPage(scope, cursor)),
+      channelInfo: (id) =>
+        guard(() => {
+          this.channelInfoCalls++;
+          const channel = [...this.channels, ...this.publicChannels].find((c) => c.id === id);
+          if (!channel) throw new SlackApiError("channel_not_found");
+          return { name: channel.name, archived: false };
+        }),
       listUsergroups: () => guard(() => this.usergroups),
       openDm: (userId) => guard(() => `D${userId}`),
       postMessage: (channel, message) =>

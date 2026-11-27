@@ -275,6 +275,8 @@ export interface PlaceInfo {
   routes: string[];
   /** Routes that post here when a notification reaches nobody else. */
   defaultFor: string[];
+  /** What the last check of the room found wrong; an error stops messages to the place. */
+  issue?: { level: "error" | "warning"; message: string };
 }
 
 /** What the GitHub App's installation lacks of what the server needs. */

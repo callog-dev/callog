@@ -8,6 +8,15 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 
 ## [Unreleased]
 
+### Added
+
+- The Slack channels behind places are checked when a config is loaded, not in the first
+  notification. A place whose channel does not exist, was renamed or archived, or is private
+  without the bot in it is named on the Config page and in Settings → Places. A rate limit
+  from Slack does not reject the config: the place is marked as not checked yet and the check
+  runs again. **Load now** on the Config page checks the places again, also when the config
+  has not changed; so does connecting a workspace.
+
 ### Fixed
 
 - A notification to a Slack channel given by name no longer fails with `slack: ratelimited`
@@ -18,8 +27,10 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
 
 ### Operator actions
 
-None. In a large workspace, inviting the bot to the channels it posts to (or giving a place
-the channel ID instead of its name) keeps the lookup to a single request.
+None. To see the state of the places of a config that was loaded before the upgrade, press
+**Load now** on the Config page once. In a large workspace, inviting the bot to the channels
+it posts to (or giving a place the channel ID instead of its name) keeps the lookup to a
+single request.
 
 ## [0.5.1]
 

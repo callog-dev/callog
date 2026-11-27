@@ -11,6 +11,10 @@ import { SlackConnectionsService } from "./slack-connections.service";
 
 /** Slack channel ids (public, private, DM); anything else is a channel name. */
 export const SLACK_CHANNEL_ID = /^[CGD][A-Z0-9]{6,}$/;
+/** The channel name a room of the config is given by; nothing when it is given by id. */
+export function slackChannelName(room: string): string | undefined {
+  return SLACK_CHANNEL_ID.test(room) ? undefined : room.replace(/^#/, "");
+}
 /** Errors meaning a cached name → id mapping is stale (channel archived or deleted). */
 const STALE_CHANNEL = new Set(["channel_not_found", "is_archived"]);
 
@@ -30,8 +34,8 @@ export class SlackSender {
     message: SlackMessagePayload,
   ): Promise<SlackPostResult> {
     const api = await this.requireApi(tenantId);
-    if (SLACK_CHANNEL_ID.test(channel)) return api.postMessage(channel, message);
-    const name = channel.replace(/^#/, "");
+    const name = slackChannelName(channel);
+    if (!name) return api.postMessage(channel, message);
     const directory = this.directory(tenantId, api);
     const { id, listed } = await directory.find(name);
     try {
@@ -42,6 +46,25 @@ export class SlackSender {
       if (listed || !(err instanceof SlackApiError && STALE_CHANNEL.has(err.code))) throw err;
       return api.postMessage((await directory.findAgain(name, id)).id, message);
     }
+  }
+
+  /**
+   * Asks Slack whether a channel name stands for a channel the bot can see; throws the
+   * Slack error when not. A name seen before costs one request, not a listing.
+   */
+  async checkChannel(tenantId: string, name: string): Promise<void> {
+    const api = await this.requireApi(tenantId);
+    const directory = this.directory(tenantId, api);
+    const { id, listed } = await directory.find(name);
+    if (listed) return;
+    const stillThere = await api.channelInfo(id).then(
+      (channel) => !channel.archived && channel.name === name,
+      (err: unknown) => {
+        if (err instanceof SlackApiError && err.code === "channel_not_found") return false;
+        throw err;
+      },
+    );
+    if (!stillThere) await directory.findAgain(name, id);
   }
 
   async postDirect(
