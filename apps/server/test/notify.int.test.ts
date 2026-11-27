@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DB, type Db } from "../src/db/db";
 import { notifications, tenants } from "../src/db/schema";
+import { NotificationsService } from "../src/notifications/notifications.service";
 import type { FakeOidc } from "./setup/fake-oidc";
 import { createTestApp, createTenant, activateConfig } from "./setup/test-app";
 
@@ -264,6 +265,25 @@ describe("POST /v1/notify (integration)", () => {
         route: "e2e-failed",
         status: "accepted",
         deliveries: [],
+      });
+    });
+
+    it("says the notification was cancelled, without naming the admin", async () => {
+      const id = (await notify(BODY)).json().notification_id;
+      const [n] = await db.select().from(notifications).where(eq(notifications.id, id));
+      await app.get(NotificationsService).cancel(
+        n!.tenantId,
+        id,
+        { type: "admin", actor: "@octocat" },
+        {
+          personId: null,
+          githubLogin: "octocat",
+        },
+      );
+
+      expect((await get(id)).json()).toMatchObject({
+        status: "cancelled",
+        cancelled: { at: expect.any(String), by: { type: "admin" } },
       });
     });
 

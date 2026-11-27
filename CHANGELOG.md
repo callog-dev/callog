@@ -16,6 +16,13 @@ versions follow [semver](https://semver.org/): a **minor** release is a regular 
   from Slack does not reject the config: the place is marked as not checked yet and the check
   runs again. **Load now** on the Config page checks the places again, also when the config
   has not changed; so does connecting a workspace.
+- A notification that is not delivered yet can be stopped: **Cancel sending** in its panel on
+  the Deliveries page. Deliveries not sent yet become `cancelled` and are not retried; messages
+  already sent stay, and a send already on its way when you cancel still lands. The
+  notification gets the status `cancelled`, the panel says who cancelled it and when, and the
+  action is recorded in the audit log. `GET /v1/notifications/:id` returns the new status and
+  `cancelled: { at, by: { type: "admin" } }`, without naming the admin. A cancelled repeat of
+  a grouped notification edits nothing and is not counted in "Repeated N times".
 
 ### Changed
 

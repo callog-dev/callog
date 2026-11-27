@@ -157,6 +157,16 @@ export type NotificationSource =
   /** "Send test" in the admin UI; `actor` is who pressed it (`@login` or a person's name). */
   | { type: "admin_test"; actor: string };
 
+/** A notification still on its way: it can be cancelled, and later ones of its thread wait. */
+export const OPEN_STATUSES = ["accepted", "processing"] as const;
+
+export function isOpen(status: string): status is (typeof OPEN_STATUSES)[number] {
+  return (OPEN_STATUSES as readonly string[]).includes(status);
+}
+
+/** Who stopped a notification: an admin (`@login` or a person's name), or its sender. */
+export type CancelledBy = { type: "admin"; actor: string } | { type: "sender" };
+
 /** Why a recipient of a notification got no message of their own, or no mention. */
 export interface TraceNote {
   /** `person:<id>` for someone Callog knows, otherwise the ref as the sender wrote it. */
@@ -195,10 +205,12 @@ export const notifications = pgTable(
     /** Written once, when the deliveries are planned. */
     trace: jsonb("trace").$type<TraceNote[]>().notNull().default([]),
     status: text("status", {
-      enum: ["accepted", "processing", "delivered", "partially_failed", "failed"],
+      enum: ["accepted", "processing", "delivered", "partially_failed", "failed", "cancelled"],
     })
       .notNull()
       .default("accepted"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledBy: jsonb("cancelled_by").$type<CancelledBy>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -229,7 +241,7 @@ export const deliveries = pgTable(
       .references(() => notifications.id, { onDelete: "cascade" }),
     provider: text("provider", { enum: PROVIDERS }).notNull(),
     destination: text("destination").notNull(),
-    status: text("status", { enum: ["pending", "sent", "failed"] })
+    status: text("status", { enum: ["pending", "sent", "failed", "cancelled"] })
       .notNull()
       .default("pending"),
     attempts: integer("attempts").notNull().default(0),

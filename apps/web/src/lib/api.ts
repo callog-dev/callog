@@ -112,12 +112,12 @@ export const api = {
 // ---- Admin ----
 
 export type NotificationStatus =
-  "accepted" | "processing" | "delivered" | "partially_failed" | "failed";
+  "accepted" | "processing" | "delivered" | "partially_failed" | "failed" | "cancelled";
 
 export interface DeliverySummary {
   provider: "slack" | "telegram";
   destination: string;
-  status: "pending" | "sent" | "failed";
+  status: "pending" | "sent" | "failed" | "cancelled";
 }
 
 export interface NotificationRow {
@@ -174,12 +174,17 @@ export interface TracedDelivery extends DeliverySummary {
   fallbackTo: string | null;
 }
 
+/** Who stopped a notification: an admin (`@login` or a name), or its sender. */
+export type CancelledBy = { type: "admin"; actor: string } | { type: "sender" };
+
 export interface NotificationDetails extends Omit<NotificationRow, "deliveries"> {
   data: Record<string, unknown>;
   recipients: string[];
   update: boolean;
   /** Set when the route groups repeats: `joined` means this one edited an earlier message. */
   group: { key: string; joined: boolean } | null;
+  /** Who stopped it and when; deliveries still pending then were cancelled. */
+  cancelled: { at: string; by: CancelledBy } | null;
   notes: TraceNote[];
   deliveries: TracedDelivery[];
 }
@@ -456,6 +461,8 @@ export const adminApi = {
     ),
   notification: (id: string) =>
     request<NotificationDetails>("GET", `/api/admin/notifications/${id}`),
+  cancelNotification: (id: string) =>
+    request<{ status: "cancelled" }>("POST", `/api/admin/notifications/${id}/cancel`),
   retryNotification: (id: string) =>
     request<{ status: "accepted" }>("POST", `/api/admin/notifications/${id}/retry`),
   people: (params: { q: string; status: string; page: string }) => {

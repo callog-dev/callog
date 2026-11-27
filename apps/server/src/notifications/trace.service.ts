@@ -2,9 +2,10 @@ import { Inject, Injectable } from "@nestjs/common";
 import { parseRef, type Ref } from "@callog/config-schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { DB, type Db } from "../db/db";
-import { deliveries, notifications, persons, type TraceNote } from "../db/schema";
+import { deliveries, notifications, persons, type CancelledBy, type TraceNote } from "../db/schema";
 
 type Notification = typeof notifications.$inferSelect;
+type Delivery = typeof deliveries.$inferSelect;
 
 /** Someone the trace talks about: the ref, and the person's name when Callog knows them. */
 export interface TracedRecipient {
@@ -15,13 +16,15 @@ export interface TracedRecipient {
 export interface Trace {
   /** Set when the route groups repeats: `joined` means this one edited an earlier message. */
   group: { key: string; joined: boolean } | null;
+  /** Who stopped the notification and when; deliveries still pending then are `cancelled`. */
+  cancelled: { at: Date; by: CancelledBy } | null;
   /** Why a recipient got no message of their own, or no mention. */
   notes: (Omit<TraceNote, "recipient"> & { recipient: TracedRecipient })[];
   deliveries: {
     id: string;
     provider: string;
     destination: string;
-    status: "pending" | "sent" | "failed";
+    status: Delivery["status"];
     attempts: number;
     lastError: string | null;
     sentAt: Date | null;
@@ -54,6 +57,10 @@ export class TraceService {
       group: notification.groupKey
         ? { key: notification.groupKey, joined: notification.update }
         : null,
+      cancelled:
+        notification.cancelledAt && notification.cancelledBy
+          ? { at: notification.cancelledAt, by: notification.cancelledBy }
+          : null,
       notes: notification.trace.map((note) => ({ ...note, recipient: name(note.recipient) })),
       deliveries: rows.map((row) => ({
         id: row.id,

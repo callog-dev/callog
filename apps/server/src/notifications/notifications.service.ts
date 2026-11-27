@@ -23,11 +23,12 @@ import { and, desc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { AuditService, type AuditActor } from "../audit/audit.service";
 import { sha256Hex } from "../crypto/digest";
 import { DB, type Db } from "../db/db";
-import { deliveries, idempotencyKeys, notifications } from "../db/schema";
+import { deliveries, idempotencyKeys, isOpen, notifications, type CancelledBy } from "../db/schema";
 import { ProducerAuthService, type Producer } from "../producers/producer-auth.service";
 import { QueueService } from "../queue/queue.service";
 import { TenantConfigService } from "../tenant-config/tenant-config.service";
 import { MetricsService } from "../metrics/metrics.service";
+import { cancelPending } from "./cancel-pending";
 import { DataValidator } from "./data-validator";
 import { GROUP_THREAD_PREFIX, MAX_RECIPIENTS, type NotifyRequest } from "./notify-request";
 import { TraceService } from "./trace.service";
@@ -38,6 +39,9 @@ export const DELIVER_TASK = "notification.deliver";
  * the delivery retry window.
  */
 export const DELIVER_MAX_ATTEMPTS = 8;
+
+/** One delivery job per notification, so cancelling can take it off the queue. */
+const deliverJobKey = (notificationId: string) => `deliver:${notificationId}`;
 
 function threadQueueName(tenantId: string, threadKey: string | null | undefined) {
   return threadKey ? `thread:${tenantId}:${threadKey}` : undefined;
@@ -210,6 +214,11 @@ export class NotificationsService {
       urgency: notification.urgency,
       created_at: notification.createdAt,
       group: trace.group,
+      /** Senders learn who cancelled (an admin, or they themselves), not which admin. */
+      cancelled: trace.cancelled && {
+        at: trace.cancelled.at,
+        by: { type: trace.cancelled.by.type },
+      },
       /**
        * Which of the recipients the sender named led nowhere. What is known about people —
        * their names, their accounts, what they muted — is for admins, not for senders.
@@ -271,6 +280,47 @@ export class NotificationsService {
           action: "notification.retried",
           actor,
           details: { notificationId, deliveries: retried.length },
+        },
+        tx,
+      );
+    });
+  }
+
+  /**
+   * Stops a notification that is not delivered yet: what is still pending is cancelled and
+   * its job leaves the queue. What was already sent stays. A job already running sees the
+   * cancellation before each delivery (DeliveryService).
+   */
+  async cancel(
+    tenantId: string,
+    notificationId: string,
+    by: CancelledBy,
+    actor: AuditActor,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [notification] = await tx
+        .select({ status: notifications.status })
+        .from(notifications)
+        .where(and(eq(notifications.tenantId, tenantId), eq(notifications.id, notificationId)))
+        .for("update");
+      if (!notification) throw new NotFoundException("Notification not found");
+      if (!isOpen(notification.status)) {
+        throw new ConflictException(
+          `Nothing to cancel: the notification is ${notification.status}`,
+        );
+      }
+      const cancelled = await cancelPending(tx, notificationId);
+      await tx
+        .update(notifications)
+        .set({ status: "cancelled", cancelledAt: new Date(), cancelledBy: by })
+        .where(eq(notifications.id, notificationId));
+      await this.queue.remove(deliverJobKey(notificationId), tx);
+      await this.audit.record(
+        {
+          tenantId,
+          action: "notification.cancelled",
+          actor,
+          details: { notificationId, deliveries: cancelled.length },
         },
         tx,
       );
@@ -343,7 +393,11 @@ export class NotificationsService {
     return this.queue.enqueue(
       DELIVER_TASK,
       { notificationId },
-      { queueName: threadQueueName(tenantId, threadKey), maxAttempts: DELIVER_MAX_ATTEMPTS },
+      {
+        queueName: threadQueueName(tenantId, threadKey),
+        jobKey: deliverJobKey(notificationId),
+        maxAttempts: DELIVER_MAX_ATTEMPTS,
+      },
       tx,
     );
   }

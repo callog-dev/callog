@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RotateCw, Send, X } from "lucide-react";
+import { Ban, RotateCw, Send, X } from "lucide-react";
 import { useMemo } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -37,11 +37,19 @@ const STATUS_VARIANT: Record<
   processing: "outline",
   partially_failed: "destructive",
   failed: "destructive",
+  cancelled: "outline",
 };
 
 const POLL_MS = 10_000;
 
-const STATUSES = ["delivered", "partially_failed", "failed", "processing", "accepted"] as const;
+const STATUSES = [
+  "delivered",
+  "partially_failed",
+  "failed",
+  "processing",
+  "accepted",
+  "cancelled",
+] as const;
 
 const PERIODS = [
   ["all", "Any time"],
@@ -266,7 +274,12 @@ function deliveryColumns(filterSource: (source: string) => void): ColumnDef<Noti
       cell: ({ row: { original: r } }) => (
         <div className="flex flex-wrap gap-1">
           {r.deliveries.map((d, i) => (
-            <span key={i} className={d.status === "failed" ? "line-through opacity-60" : ""}>
+            <span
+              key={i}
+              className={
+                d.status === "sent" || d.status === "pending" ? "" : "line-through opacity-60"
+              }
+            >
               <ProviderBadge provider={d.provider}>{d.destination}</ProviderBadge>
             </span>
           ))}
@@ -288,15 +301,30 @@ function Details({ id }: { id: string }) {
     queryKey: ["admin", "notification", id],
     queryFn: () => adminApi.notification(id),
   });
+  const refresh = () => {
+    void client.invalidateQueries({ queryKey: ["admin", "notification", id] });
+    // The list catches up when it is next shown, instead of refetching every loaded page now.
+    void client.invalidateQueries({ queryKey: ["admin", "notifications"], refetchType: "none" });
+  };
   const retry = useMutation({
     mutationFn: () => adminApi.retryNotification(id),
     onSuccess: () => {
       toast.success("Sending the failed deliveries again");
-      void client.invalidateQueries({ queryKey: ["admin", "notification", id] });
-      // The list catches up when it is next shown, instead of refetching every loaded page now.
-      void client.invalidateQueries({ queryKey: ["admin", "notifications"], refetchType: "none" });
+      refresh();
     },
     onError: (e) => toast.error(e.message),
+  });
+  const cancel = useMutation({
+    mutationFn: () => adminApi.cancelNotification(id),
+    onSuccess: () => {
+      toast.success("Sending stopped");
+      refresh();
+    },
+    onError: (e) => {
+      toast.error(e.message);
+      // It may have been delivered or cancelled meanwhile.
+      refresh();
+    },
   });
   if (n.isError) return <ErrorState error={n.error} retry={() => void n.refetch()} />;
   if (!n.data) return <Skeleton className="m-4 h-64" />;
@@ -306,6 +334,7 @@ function Details({ id }: { id: string }) {
   const failed = d.deliveries.filter((x) => x.status === "failed" && !x.fallbackTo).length;
   // The server retries only a notification that ended with something undelivered.
   const retryable = d.status === "failed" || d.status === "partially_failed";
+  const cancellable = d.status === "accepted" || d.status === "processing";
 
   return (
     <>
@@ -322,6 +351,25 @@ function Details({ id }: { id: string }) {
         <section>
           <div className="mb-2 flex items-center justify-between">
             <h3 className="font-medium">Deliveries</h3>
+            {cancellable && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={cancel.isPending}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: "Stop sending this notification?",
+                    description:
+                      "Deliveries not sent yet are cancelled and not retried. Messages already sent stay.",
+                    action: "Stop sending",
+                    destructive: true,
+                  });
+                  if (ok) cancel.mutate();
+                }}
+              >
+                <Ban /> Cancel sending
+              </Button>
+            )}
             {failed > 0 && retryable && (
               <Button
                 size="sm"
@@ -342,6 +390,12 @@ function Details({ id }: { id: string }) {
               </Button>
             )}
           </div>
+          {d.cancelled && (
+            <p className="mb-2 text-muted-foreground">
+              Cancelled by {d.cancelled.by.type === "admin" ? d.cancelled.by.actor : "the sender"}{" "}
+              <span title={d.cancelled.at}>{ago(d.cancelled.at)}</span>.
+            </p>
+          )}
           {d.group && (
             <p className="mb-2 text-muted-foreground">
               {d.group.joined

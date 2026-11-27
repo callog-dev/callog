@@ -50,6 +50,14 @@ export class QueueService {
   }
 
   /**
+   * Takes a job off the queue. One already running is not stopped, but it will not be run
+   * again (graphile-worker clears its key and uses up its attempts).
+   */
+  async remove(jobKey: string, executor: DbExecutor = this.db): Promise<void> {
+    await executor.execute(sql`select graphile_worker.remove_job(${jobKey})`);
+  }
+
+  /**
    * Adds a job via SQL so it can share a transaction with the caller's writes:
    * pass `tx` to enqueue atomically with them.
    */

@@ -527,6 +527,35 @@ teams:
     expect((await call("POST", `/api/admin/notifications/${missing}/retry`)).statusCode).toBe(404);
   });
 
+  it("cancels a notification that is still on its way, once", async () => {
+    const [n] = await db
+      .insert(notifications)
+      .values({
+        tenantId,
+        routeId: "r",
+        configVersionId: versionId,
+        source: { type: "api_key", apiKeyId: "k", apiKeyName: "ci" },
+        status: "processing",
+      })
+      .returning();
+    await db
+      .insert(deliveries)
+      .values({ tenantId, notificationId: n!.id, provider: "slack", destination: "C0A" });
+
+    const res = await call("POST", `/api/admin/notifications/${n!.id}/cancel`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ status: "cancelled" });
+    const shown = (await call("GET", `/api/admin/notifications/${n!.id}`)).json();
+    expect(shown).toMatchObject({
+      status: "cancelled",
+      cancelled: { at: expect.any(String), by: { type: "admin", actor: "@alice-gh" } },
+      deliveries: [{ status: "cancelled" }],
+    });
+    expect((await call("POST", `/api/admin/notifications/${n!.id}/cancel`)).statusCode).toBe(409);
+    const missing = "00000000-0000-4000-8000-000000000000";
+    expect((await call("POST", `/api/admin/notifications/${missing}/cancel`)).statusCode).toBe(404);
+  });
+
   it("links an unmapped recipient to a person and clears it from the report", async () => {
     await db
       .insert(unmappedRecipients)
